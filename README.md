@@ -14,13 +14,13 @@ Options to configure your environment:
 1. Use docker, following the instructions in one of:
 
 ```bash
-launch_docker_mi300x.md
-launch_docker_mi350x.md
+utils/launch_docker_mi300x.md
+utils/launch_docker_mi350x.md
 ```
 
 If you want to specifically use ```mojo```:
 ```bash
-setup_mojo.md
+utils/setup_mojo.md
 ```
 
 

@@ -2,16 +2,13 @@
 using namespace kittens;
 
 
-__device__ inline float4 load_global_vec_new(const float4* gptr) {
-    float4 v;
-    asm volatile(
-        "global_load_dwordx4 %0, %1, off\n"
-        : "=v"(v) 
-        : "v"(gptr)
-        : "memory"
-    );
-    return v;   
-}
+
+/*
+
+Assembly and intrinsic functions.
+
+*/
+
 
 __device__ inline void store_shared_vec_new(uint32_t lds_off, float2 val) {
     asm volatile(
@@ -21,6 +18,25 @@ __device__ inline void store_shared_vec_new(uint32_t lds_off, float2 val) {
         : "memory"
     );
 }
+
+
+__device__ inline float2 load_shared_vec_async(uint32_t lds_off) {
+    float2 result;
+    asm volatile(
+        "ds_read_b64 %0, %1\n"
+        // "s_waitcnt lgkmcnt(0)\n"
+        : "=v"(result)              // Output: store result in float2
+        : "v"(lds_off)              // Input: LDS offset to read from
+        : "memory"
+    );
+    return result;
+}
+
+
+using as3_uint32_ptr = uint32_t __attribute__((address_space(3)))*;
+using index_t = int;
+using int32x4_t = int32_t __attribute__((ext_vector_type(4)));
+
 
 
 enum class coherency {
@@ -35,6 +51,16 @@ __device__ inline float4 buffer_load_vec4(i32x4 srsrc, uint32_t offset_bytes) {
     __uint128_t raw = llvm_amdgcn_raw_buffer_load_b128(srsrc, offset_bytes, 0, cc);
     return *reinterpret_cast<float4*>(&raw);
 }
+
+
+
+/*
+
+Load store functions.
+
+*/
+
+
 
 // Load from global memory to registers with proper batching for cache locality
 template<int axis, bool assume_aligned,
@@ -85,96 +111,6 @@ __device__ inline void load_global_to_registers(
     }
 }
 
-// Add the external intrinsic declaration
-
-using as3_uint32_ptr = uint32_t __attribute__((address_space(3)))*;
-using index_t = int;
-using int32x4_t = int32_t __attribute__((ext_vector_type(4)));
-
-extern "C" __device__ void 
-llvm_amdgcn_raw_buffer_load_lds(int32x4_t rsrc,
-                                as3_uint32_ptr lds_ptr,
-                                index_t size,
-                                index_t voffset,
-                                index_t soffset,
-                                index_t offset,
-                                index_t aux) __asm("llvm.amdgcn.raw.buffer.load.lds");
-
-// Direct global-to-shared load using buffer load to LDS
-// Correct approach: respect the split memory layout using supported load sizes
-template<int axis, bool assume_aligned,
-         ducks::st::all ST, ducks::gl::all GL,
-         ducks::coord::tile COORD = coord<ST>,
-         int N_THREADS = WARP_THREADS, int NUM_WARPS = 1>
-__device__ inline void load_global_to_shared_direct(
-    const GL& src, const COORD& idx, ST& dst)
-{
-    using T = typename ST::dtype;
-    constexpr int vec_len = 16 / sizeof(T);  // e.g., 8 for bf16, 4 for fp32
-    constexpr int vecs_per_row = ST::cols / vec_len;
-    constexpr int total_vecs = ST::rows * vecs_per_row;
-
-    const int row_stride = src.template stride<axis>();
-    coord<> unit_coord = idx.template unit_coord<axis, 3>();
-    T* global_ptr = (T*)&src[unit_coord];
-    i32x4 srsrc = make_srsrc(global_ptr, row_stride * ST::rows * sizeof(T));
-
-    int thread_id = threadIdx.x % N_THREADS;
-
-    for (int i = thread_id; i < total_vecs; i += N_THREADS) {
-        const int row = i / vecs_per_row;
-        const int col = (i % vecs_per_row) * vec_len;
-
-        const int global_elem_offset = row * row_stride + col;
-
-        const T* lds_base = &dst.data[0];
-        const T* lds_elem_ptr = lds_base + row * ST::cols + col;
-        uintptr_t lds_addr = reinterpret_cast<uintptr_t>(lds_elem_ptr);
-        as3_uint32_ptr lds_ptr = (as3_uint32_ptr)(lds_addr);
-
-        llvm_amdgcn_raw_buffer_load_lds(
-            srsrc,
-            lds_ptr,
-            16,
-            global_elem_offset * sizeof(T),
-            0, 0,
-            static_cast<index_t>(coherency::cache_all));
-    }
-
-    __syncthreads();
-}
-
-template<int axis, bool assume_aligned, ducks::st::all ST, ducks::gl::all GL,
-         ducks::coord::tile COORD = coord<ST>, int N_THREADS = WARP_THREADS>
-__device__ inline void store_linear(const GL &dst, const ST &src, const COORD &idx) {
-    using T = typename ST::dtype;
-    constexpr int vec_len = 16 / sizeof(T);
-    constexpr int vecs_per_row = ST::cols / vec_len;
-    constexpr int total_vecs = ST::rows * vecs_per_row;
-
-    const int row_stride = dst.template stride<axis>();
-    coord<> unit_coord = idx.template unit_coord<axis, 3>();
-    T* dst_ptr = (T*)&dst[unit_coord];
-
-    int thread_id = threadIdx.x % N_THREADS;
-
-    for (int i = thread_id; i < total_vecs; i += N_THREADS) {
-        const int row = i / vecs_per_row;
-        const int col = (i % vecs_per_row) * vec_len;
-
-        const int flat_idx = row * ST::cols + col;
-        const T* lds_ptr = &src.data[flat_idx];
-
-        const int gmem_offset = row * row_stride + col;
-
-        float4 val;
-        memcpy(&val, lds_ptr, 16);
-
-        memcpy(&dst_ptr[gmem_offset], &val, 16);
-    }
-}
-
-
 // Store from registers to shared memory (preserving the batched pattern)
 template<ducks::st::all ST, int N_THREADS = WARP_THREADS>
 __device__ inline void store_registers_to_shared(
@@ -216,32 +152,6 @@ __device__ inline void store_registers_to_shared(
     }
 }
 
-
-
-
-__device__ inline float2 load_shared_vec_async_offset(uint32_t lds_off, uint32_t offset) {
-    float2 result;
-    asm volatile(
-        "ds_read_b64 %0, %1 offset:%2\n"
-        // "s_waitcnt lgkmcnt(0)\n"
-        : "=v"(result)              // Output: store result in float2
-        : "v"(lds_off), "i"(offset)              // Input: LDS offset to read from
-        : "memory"
-    );
-    return result;
-}
-
-__device__ inline float2 load_shared_vec_async(uint32_t lds_off) {
-    float2 result;
-    asm volatile(
-        "ds_read_b64 %0, %1\n"
-        // "s_waitcnt lgkmcnt(0)\n"
-        : "=v"(result)              // Output: store result in float2
-        : "v"(lds_off)              // Input: LDS offset to read from
-        : "memory"
-    );
-    return result;
-}
 
 /**
  * @brief Load data from a shared tile into a register tile.
@@ -317,62 +227,230 @@ __device__ inline static void load_async_shared_to_register(RT &dst, const ST &s
 }
 
 
+extern "C" __device__ void 
+llvm_amdgcn_raw_buffer_load_lds(int32x4_t rsrc, // does not change (buffer resource; scalar array?)
+                                as3_uint32_ptr lds_ptr, // does not change
+                                index_t size, // does not change (16 bytes)
+                                index_t voffset, 
+                                index_t soffset, 
+                                index_t offset,  // does not change (0); instruction offset
+                                index_t aux) __asm("llvm.amdgcn.raw.buffer.load.lds"); // cache coherency
 
-__device__ inline void store_global_float(float* ptr, float val) {
+// Direct global-to-shared load using buffer load to LDS
+template<int axis, bool assume_aligned,
+         ducks::st::all ST, ducks::gl::all GL,
+         ducks::coord::tile COORD = coord<ST>,
+         int N_THREADS = WARP_THREADS, int NUM_WARPS = 1>
+__device__ inline void load_global_to_shared_direct(
+    const GL& src, const COORD& idx, ST& dst)
+{
+    using T = typename ST::dtype;
+    constexpr int vec_len = 16 / sizeof(T);  // e.g., 8 for bf16, 4 for fp32
+    constexpr int vecs_per_row = ST::cols / vec_len; 
+    constexpr int total_vecs = ST::rows * vecs_per_row;
+
+    const int row_stride = src.template stride<axis>();
+    coord<> unit_coord = idx.template unit_coord<axis, 3>();
+    T* global_ptr = (T*)&src[unit_coord];
+    i32x4 srsrc = make_srsrc(global_ptr, row_stride * ST::rows * sizeof(T));
+
+    int thread_id = threadIdx.x % N_THREADS;
+
+    for (int i = thread_id; i < total_vecs; i += N_THREADS) {
+        const int row = i / vecs_per_row;
+        const int col = (i % vecs_per_row) * vec_len;
+        const int global_elem_offset = (row * row_stride + col) * sizeof(T);
+
+        const int swizzle_bytes = ST::swizzle_bytes;
+        static constexpr int swizzle_repeat = swizzle_bytes << 3; // 8 threads max out the banks
+        const int swizzle = ((global_elem_offset % swizzle_repeat) >> 7) << 4;
+        const int final_global_elem_offset = (global_elem_offset ^ swizzle);
+        printf("threadIdx.x: %d, row: %d, col: %d, global_elem_offset: %d, final_global_elem_offset: %d\n", threadIdx.x, row, col, global_elem_offset, final_global_elem_offset);
+
+        const T* lds_base = &dst.data[0];
+        const T* lds_elem_ptr = lds_base + row * ST::cols + col;
+        uintptr_t lds_addr = reinterpret_cast<uintptr_t>(lds_elem_ptr);
+        as3_uint32_ptr lds_ptr = (as3_uint32_ptr)(lds_addr);
+
+        llvm_amdgcn_raw_buffer_load_lds(
+            srsrc, // buffer resource
+            lds_ptr,
+            16, // 16 bytes
+            final_global_elem_offset,
+            0, 
+            0, // instruction offset
+            static_cast<index_t>(coherency::cache_all)); // cache coherency
+    }
+    __syncthreads();
+}
+
+
+__device__ inline float4 load_shared_vec_b128(uint32_t lds_off) {
+    float4 result;
     asm volatile(
-        "global_store_dword %0, %1, off\n"
-        :
-        : "v"(ptr), "v"(val)
+        "ds_read_b128 %0, %1\n"
+        "s_waitcnt lgkmcnt(0)\n"
+        : "=v"(result)              // Output: store result in float4
+        : "v"(lds_off)              // Input: LDS offset to read from
         : "memory"
     );
+    return result;
 }
+
 /**
- * @brief Store data from a register tile to a destination array in global memory with a column-major layout.
+ * @brief Load data from a shared tile into a register tile.
  *
- * @tparam RT The register tile type with a column-major layout.
- * @tparam U The data type of the destination array.
- * @param[out] dst The destination array in global memory to store data into.
- * @param[in] src The source register tile to store data from.
- * @param row_stride[in] The stride in elements between rows in the destination array.
+ * @tparam RT The register tile type
+ * @tparam ST The shared tile type
+ * @param dst[out] The destination register tile.
+ * @param src[in]  The source shared tile.
  */
-template<int axis, ducks::rt::col_layout RT, ducks::gl::all GL, ducks::coord::tile COORD=coord<RT>>
-__device__ inline static void store_transposed(const GL &dst, const RT &src, const COORD &idx) {
-    using T = base_types::packing<typename RT::dtype>::unpacked_type;
-    using U = typename GL::dtype;
-    using U2 = base_types::packing<U>::packed_type;
-    using T2 = base_types::packing<T>::packed_type;
+template<ducks::rt::all RT, ducks::st::all ST>
+__device__ inline static void load_lds_reg(RT &dst, const ST &src) {
 
-    U *dst_ptr = (U*)&dst[(idx.template unit_coord<axis, 3>())];
-    const int row_stride = dst.template stride<axis>();
+    static_assert(RT::height == ST::height, "register tile and shared tile must match height");
+    static_assert(RT::width  == ST::width,  "register tile and shared tile must match width");
+
+    using T2 = RT::dtype;
+    using T  = base_types::packing<T2>::unpacked_type;
+    using U  = ST::dtype;
+    using U2 = base_types::packing<U >::packed_type;
+
     const int laneid = kittens::laneid();
-    const int row_offset = 4*(laneid/16), col_offset = laneid%16;
+    const uint32_t src_ptr = reinterpret_cast<uintptr_t>(&src.data[0]);
 
-    uint32_t buffer_size = dst.batch * dst.depth * dst.rows * dst.cols * sizeof(U);
-    buffer_resource br = make_buffer_resource(dst_ptr, buffer_size, 0x00020000);
-
+    // printf("laneid: %d\n", laneid);
+    int row_offset, col_offset;
+    if constexpr (std::is_same_v<typename RT::layout, ducks::rt_layout::row>) {
+        row_offset = laneid%16;
+        col_offset = 8*(laneid/16);
+    }
+    else {
+        row_offset = 8*(laneid/16);
+        col_offset = laneid%16;
+    }
+    // printf("(dst.height, dst.width): (%d, %d)\n", dst.height, dst.width);
     #pragma unroll
-    for(int i = 0; i < src.height; i++) {
-        const int row = i*src.tile_size_row + row_offset;
+    for(int i = 0; i < dst.height; i++) {
+        const int row = i*dst.tile_size_row + row_offset;
         #pragma unroll
-        for(int j = 0; j < src.width; j++) {
-            const int col = j*src.tile_size_col + col_offset;
-            U2 tmp[2] = {base_types::convertor<U2, T2>::convert(src.tiles[i][j].data[0]), base_types::convertor<U2, T2>::convert(src.tiles[i][j].data[1])};
-            uint64_t tmp_val = *(uint64_t*)tmp;
+        for(int j = 0; j < dst.width; j++) {
+            const int col = j*dst.tile_size_col + col_offset;
+            if constexpr (std::is_same_v<typename RT::layout, ducks::rt_layout::row>) { // handle the row-major layout
 
-            llvm_amdgcn_raw_buffer_store_b64(
-                tmp_val,
-                std::bit_cast<i32x4>(br),
-                (col*row_stride + row) * sizeof(U),
-                0,
-                0
-            );
+                // const int swizzle_bytes = 128;
+                // static constexpr int swizzle_repeat = swizzle_bytes << 3;
+                // const int base_addr = src_ptr + row * ST::underlying_cols * sizeof(U) + col * sizeof(U);
+                // const int swizzle_addr = ((base_addr % swizzle_repeat) >> 7) << 4;
+                // float2 loaded = load_shared_vec(swizzle_addr);
+
+                const int out_addr = src.idx(src_ptr, {row, col});
+                if (threadIdx.x == 0 || threadIdx.x == 1 || threadIdx.x == 2) { 
+                    printf("threadIdx.x: %d, row: %d, col: %d, out_addr: %x\n", threadIdx.x, row, col, out_addr);
+                }
+
+                float4 loaded = load_shared_vec_b128(out_addr);
+                U2* tmp = reinterpret_cast<U2*>(&loaded);
+                dst.tiles[i][j].data[0] = base_types::convertor<T2, U2>::convert(tmp[0]);
+                dst.tiles[i][j].data[1] = base_types::convertor<T2, U2>::convert(tmp[1]);
+                dst.tiles[i][j].data[2] = base_types::convertor<T2, U2>::convert(tmp[2]);
+                dst.tiles[i][j].data[3] = base_types::convertor<T2, U2>::convert(tmp[3]);
+
+            }
+            else { // handle the column-major layout
+                dst.tiles[i][j].data[0] = base_types::convertor<T2, U2>::convert(U2{src[{row, col}], src[{row+1, col}]});
+                dst.tiles[i][j].data[1] = base_types::convertor<T2, U2>::convert(U2{src[{row+2, col}], src[{row+3, col}]});
+            }
         }
     }
 }
 
-template<ducks::rt::all RT, ducks::gl::all GL, ducks::coord::tile COORD=coord<RT>>
-__device__ inline static void store_transposed(const GL &dst, const RT &src, const COORD &idx) {
-    store_transposed<2, RT, GL, COORD>(dst, src, idx);
+
+template<int axis, bool assume_aligned, ducks::st::all ST, ducks::gl::all GL,
+         ducks::coord::tile COORD = coord<ST>, int N_THREADS = WARP_THREADS>
+__device__ inline void store_linear(const GL &dst, const ST &src, const COORD &idx) {
+    
+    // determine the number of contiguous vectors we need to load overall
+    using T = typename ST::dtype;
+    constexpr int vec_len = 16 / sizeof(T);
+    constexpr int vecs_per_row = ST::cols / vec_len;
+    constexpr int total_vecs = ST::rows * vecs_per_row;
+
+    // take the input idx and extract information from the global layout to get the correct pointer. 
+    const int row_stride = dst.template stride<axis>();
+    coord<> unit_coord = idx.template unit_coord<axis, 3>();
+    T* dst_ptr = (T*)&dst[unit_coord];
+    int thread_id = threadIdx.x % N_THREADS;
+
+    for (int i = thread_id; i < total_vecs; i += N_THREADS) {
+        const int row = i / vecs_per_row;
+        const int col = (i % vecs_per_row) * vec_len;
+        const int flat_idx = row * ST::cols + col;
+        const T* lds_ptr = &src.data[flat_idx];
+        const int gmem_offset = row * row_stride + col;
+
+        float4 val;
+        memcpy(&val, lds_ptr, 16);
+        memcpy(&dst_ptr[gmem_offset], &val, 16);
+    }
+}
+
+
+/**
+ * @brief Load data from a shared tile into a register tile.
+ *
+ * @tparam RT The register tile type
+ * @tparam ST The shared tile type
+ * @param dst[out] The destination register tile.
+ * @param src[in]  The source shared tile.
+ */
+template<ducks::rt::all RT, ducks::st::all ST>
+__device__ inline static void load_linear_pad(RT &dst, const ST &src) {
+
+    static_assert(RT::height == ST::height, "register tile and shared tile must match height");
+    static_assert(RT::width  == ST::width,  "register tile and shared tile must match width");
+
+    using T2 = RT::dtype;
+    using T  = base_types::packing<T2>::unpacked_type;
+    using U  = ST::dtype;
+    using U2 = base_types::packing<U >::packed_type;
+
+    const int laneid = kittens::laneid();
+    const uint32_t src_ptr = reinterpret_cast<uintptr_t>(&src.data[0]);
+
+    // printf("laneid: %d\n", laneid);
+    int row_offset, col_offset;
+    if constexpr (std::is_same_v<typename RT::layout, ducks::rt_layout::row>) {
+        row_offset = laneid/4;
+        col_offset = 4*(laneid%4);
+    }
+    else {
+        // TODO: fix later. 
+        row_offset = 4*(laneid/16);
+        col_offset = laneid%16;
+    }
+
+    #pragma unroll
+    for(int i = 0; i < dst.height; i++) {
+        const int row = i*dst.tile_size_row + row_offset;
+
+
+        #pragma unroll
+        for(int j = 0; j < dst.width; j++) {
+            const int col = j*dst.tile_size_col + col_offset;
+
+            if constexpr (std::is_same_v<typename RT::layout, ducks::rt_layout::row>) { // handle the row-major layout
+                float2 loaded = load_shared_vec(src_ptr + row * ST::underlying_cols * sizeof(U) + col * sizeof(U)); 
+                U2* tmp = reinterpret_cast<U2*>(&loaded);
+                dst.tiles[i][j].data[0] = base_types::convertor<T2, U2>::convert(tmp[0]);
+                dst.tiles[i][j].data[1] = base_types::convertor<T2, U2>::convert(tmp[1]);
+            }
+            else { // handle the column-major layout
+                dst.tiles[i][j].data[0] = base_types::convertor<T2, U2>::convert(U2{src[{row, col}], src[{row+1, col}]});
+                dst.tiles[i][j].data[1] = base_types::convertor<T2, U2>::convert(U2{src[{row+2, col}], src[{row+3, col}]});
+            }
+        }
+    }
 }
 
 

@@ -3,7 +3,8 @@
 #include "../utils.cpp"
 using namespace kittens;
 
-constexpr int BLOCK_SIZE = 64;  
+constexpr int BLOCK_SIZE_ROWS = 64;
+constexpr int BLOCK_SIZE_COLS = 64;  
 
 #define NUM_WARPS 1
 #define NUM_THREADS (kittens::WARP_THREADS * NUM_WARPS)
@@ -14,6 +15,8 @@ using _gl_C = gl<bf16, -1, -1, -1, -1>;
 
 using G = kittens::group<NUM_WARPS>;
 
+#define USE_REF 0
+#define USE_BASE 1
 
 struct micro_globals {
     _gl_A in;
@@ -27,30 +30,54 @@ __global__ __launch_bounds__(NUM_THREADS, 1)
 void micro_tk(const micro_globals g) {
     extern __shared__ alignment_dummy __shm[];
     shared_allocator al((int*)&__shm[0]);
-    st_bf<BLOCK_SIZE, BLOCK_SIZE> (&In) = al.allocate<st_bf<BLOCK_SIZE, BLOCK_SIZE>>();
-    st_bf<BLOCK_SIZE, BLOCK_SIZE> (&In_ref) = al.allocate<st_bf<BLOCK_SIZE, BLOCK_SIZE>>();
-    st_bf<BLOCK_SIZE, BLOCK_SIZE> (&Out) = al.allocate<st_bf<BLOCK_SIZE, BLOCK_SIZE>>();
-    st_bf<BLOCK_SIZE, BLOCK_SIZE> (&Ref_Out) = al.allocate<st_bf<BLOCK_SIZE, BLOCK_SIZE>>();
+    st_bf<BLOCK_SIZE_ROWS, BLOCK_SIZE_COLS> (&In) = al.allocate<st_bf<BLOCK_SIZE_ROWS, BLOCK_SIZE_COLS>>();
+    st_bf<BLOCK_SIZE_ROWS, BLOCK_SIZE_COLS> (&Out) = al.allocate<st_bf<BLOCK_SIZE_ROWS, BLOCK_SIZE_COLS>>();
 
-    rt_bf<BLOCK_SIZE, BLOCK_SIZE> in_reg, in_reg_ref;
-    rt_bf<BLOCK_SIZE, BLOCK_SIZE> out_reg, out_reg_ref;
+    st_bf<BLOCK_SIZE_ROWS, BLOCK_SIZE_COLS> (&In_ref) = al.allocate<st_bf<BLOCK_SIZE_ROWS, BLOCK_SIZE_COLS>>();
+    st_bf<BLOCK_SIZE_ROWS, BLOCK_SIZE_COLS> (&Ref_Out) = al.allocate<st_bf<BLOCK_SIZE_ROWS, BLOCK_SIZE_COLS>>();
 
-    load_global_to_shared_direct<2, false, st_bf<BLOCK_SIZE, BLOCK_SIZE>, _gl_A, coord<st_bf<BLOCK_SIZE, BLOCK_SIZE>>, NUM_THREADS>(g.in, {0, 0, 0, 0}, In);
+    rt_bf<BLOCK_SIZE_ROWS, BLOCK_SIZE_COLS> in_reg, in_reg_ref;
+    rt_fl<BLOCK_SIZE_ROWS, BLOCK_SIZE_COLS, ducks::rt_layout::col> out_reg, out_reg_ref;
+    zero(out_reg);
+    zero(out_reg_ref);
+
+    // global to shared
+    if (USE_BASE == 1)
+        load_global_to_shared_direct<2, false, st_bf<BLOCK_SIZE_ROWS, BLOCK_SIZE_COLS>, _gl_A, coord<st_bf<BLOCK_SIZE_ROWS, BLOCK_SIZE_COLS>>, NUM_THREADS>(g.in, {0, 0, 0, 0}, In);
+    if (USE_REF == 1)
+        G::load(In_ref, g.in, {0, 0, 0, 0});
+    __builtin_amdgcn_s_waitcnt(0);
+    __builtin_amdgcn_s_barrier();
+    __builtin_amdgcn_sched_barrier(0);
     __syncthreads();
-    G::load(In_ref, g.in, {0, 0, 0, 0});
+
+    // shared to registers
+    if (USE_BASE == 1)
+        // load_linear(in_reg, In);
+        // load(in_reg, In);
+        load_lds_reg(in_reg, In);
+    if (USE_REF == 1)
+        load(in_reg_ref, In_ref);
+    __builtin_amdgcn_s_waitcnt(0);
+    __builtin_amdgcn_s_barrier();
+    __builtin_amdgcn_sched_barrier(0);
     __syncthreads();
 
-    load(in_reg, In);
-    copy(out_reg, in_reg);
-    store(Out, out_reg);
+    // compute
+    // __builtin_amdgcn_s_setprio(1);
+    // if (USE_BASE == 1)
+    //     mma_ABt(out_reg, in_reg, in_reg, out_reg);
+    // if (USE_REF == 1)
+    //     mma_ABt(out_reg_ref, in_reg_ref, in_reg_ref, out_reg_ref);
+    // __builtin_amdgcn_s_barrier();
+    // __builtin_amdgcn_sched_barrier(0);
+    // __syncthreads();
 
-    load(in_reg_ref, In_ref);
-    copy(out_reg_ref, in_reg_ref);
-    store(Ref_Out, out_reg_ref);
-    __syncthreads();
-
-    G::store(g.ref_out, Ref_Out, {0, 0, 0, 0});
-    store_linear<2, false>(g.out, Out, {0, 0, 0, 0});
+    // register to global
+    if (USE_BASE == 1)
+        store(g.out, in_reg, {0, 0, 0, 0});
+    if (USE_REF == 1)
+        store(g.ref_out, in_reg_ref, {0, 0, 0, 0});
     __syncthreads();
 }
 
