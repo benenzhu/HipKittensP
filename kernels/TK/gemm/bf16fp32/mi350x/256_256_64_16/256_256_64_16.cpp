@@ -31,7 +31,7 @@ struct micro_globals {
     _gl_C c;
     dim3 grid()  { return dim3((N / BLOCK_SIZE) * (M / BLOCK_SIZE)); } 
     dim3 block() { return dim3(NUM_THREADS); } 
-    size_t dynamic_shared_memory() { return 160000; } //MAX_SHARED_MEMORY; }
+    size_t dynamic_shared_memory() { return 132768; } 
 };
 
 __global__ __launch_bounds__(NUM_THREADS, 2)
@@ -43,6 +43,7 @@ void micro_tk(const micro_globals g) {
 
     rt_bf<REG_BLOCK, DOT_SLICE> tiles[3];
     rt_fl<REG_BLOCK, REG_BLOCK, ducks::rt_layout::accumulator> C_accum[2];
+    #pragma unroll
     for (int i = 0; i < 2; i++) { zero(C_accum[i]); }
 
     // Original WGID.
@@ -79,25 +80,24 @@ void micro_tk(const micro_globals g) {
     // Load first tile into shared memory
     load_global_to_shared_direct<2, false, st_bf<BLOCK_SIZE, K_STEP>, _gl_A, coord<st_bf<BLOCK_SIZE, K_STEP>>, NUM_THREADS>(g.a, {0, 0, row, 0}, As[tic]);
     load_global_to_shared_direct<2, false, st_bf<BLOCK_SIZE, K_STEP>, _gl_B, coord<st_bf<BLOCK_SIZE, K_STEP>>, NUM_THREADS>(g.b, {0, 0, col, 0}, Bs[tic]);
-    asm volatile("s_waitcnt lgkmcnt(0) vmcnt(0)");
+    __builtin_amdgcn_s_waitcnt(0);
     __builtin_amdgcn_s_barrier();
 
     if (warp_row == 1) {
         __builtin_amdgcn_s_barrier();
     }
 
+    #pragma unroll
     for (int tile = 0; tile < num_tiles - 1; ++tile, tic^=1, toc^=1) {
 
         // Cluster 0
         load_lds_reg(tiles[0], subtile_inplace<REG_BLOCK, DOT_SLICE>(Bs[tic], {warp_col, 0}));
         load_lds_reg(tiles[1], subtile_inplace<REG_BLOCK, DOT_SLICE>(As[tic], {warp_row, 0}));
         load_lds_reg(tiles[2], subtile_inplace<REG_BLOCK, DOT_SLICE>(As[tic], {warp_row + 2, 0}));
-        load_global_to_shared_direct<2, false, st_bf<BLOCK_SIZE, K_STEP>, _gl_A, coord<st_bf<BLOCK_SIZE, K_STEP>>, NUM_THREADS>(g.a, {0, 0, row, tile+1}, As[toc]);
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
 
         // Cluster 1
-        asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_setprio(1);
         mma_ABt(C_accum[0], tiles[1], tiles[0], C_accum[0]);
         mma_ABt(C_accum[1], tiles[2], tiles[0], C_accum[1]);
@@ -114,7 +114,6 @@ void micro_tk(const micro_globals g) {
         __builtin_amdgcn_sched_barrier(0);
 
         // Cluster 3
-        asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_setprio(1);
         mma_ABt(C_accum[0], tiles[1], tiles[0], C_accum[0]);
         mma_ABt(C_accum[1], tiles[2], tiles[0], C_accum[1]);
@@ -126,11 +125,11 @@ void micro_tk(const micro_globals g) {
         load_lds_reg(tiles[0], subtile_inplace<REG_BLOCK, DOT_SLICE>(Bs[tic], {warp_col, 2}));
         load_lds_reg(tiles[1], subtile_inplace<REG_BLOCK, DOT_SLICE>(As[tic], {warp_row, 2}));
         load_lds_reg(tiles[2], subtile_inplace<REG_BLOCK, DOT_SLICE>(As[tic], {warp_row + 2, 2}));
+        load_global_to_shared_direct<2, false, st_bf<BLOCK_SIZE, K_STEP>, _gl_A, coord<st_bf<BLOCK_SIZE, K_STEP>>, NUM_THREADS>(g.a, {0, 0, row, tile+1}, As[toc]);
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
 
         // Cluster 5
-        asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_setprio(1);
         mma_ABt(C_accum[0], tiles[1], tiles[0], C_accum[0]);
         mma_ABt(C_accum[1], tiles[2], tiles[0], C_accum[1]);
@@ -142,7 +141,7 @@ void micro_tk(const micro_globals g) {
         load_lds_reg(tiles[0], subtile_inplace<REG_BLOCK, DOT_SLICE>(Bs[tic], {warp_col, 3}));
         load_lds_reg(tiles[1], subtile_inplace<REG_BLOCK, DOT_SLICE>(As[tic], {warp_row, 3}));
         load_lds_reg(tiles[2], subtile_inplace<REG_BLOCK, DOT_SLICE>(As[tic], {warp_row + 2, 3}));
-        asm volatile("s_waitcnt lgkmcnt(0) vmcnt(0)");
+        __builtin_amdgcn_s_waitcnt(0);
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
 
