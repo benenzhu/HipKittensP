@@ -336,6 +336,7 @@ __device__ inline static void load_lds_reg(RT &dst, const ST &src) {
         row_offset = 8*(laneid/16);
         col_offset = laneid%16;
     }
+    const int my_const = ST::underlying_cols * kittens::TILE_ROW_DIM<U> * sizeof(U);
 
     #pragma unroll
     for(int j = 0; j < dst.width; j++) {
@@ -358,7 +359,7 @@ __device__ inline static void load_lds_reg(RT &dst, const ST &src) {
                 asm volatile(
                     "ds_read_b128 %0, %1 offset:%2\n"
                     : "=v"(*reinterpret_cast<float4*>(&dst.tiles[i][j].data[0]))
-                    : "v"(addr), "i"(i * ST::underlying_cols * kittens::TILE_ROW_DIM<U> * sizeof(U))
+                    : "v"(addr), "i"(i * my_const)
                     : "memory"
                 );
 
@@ -366,7 +367,6 @@ __device__ inline static void load_lds_reg(RT &dst, const ST &src) {
             else { // handle the column-major layout
                 dst.tiles[i][j].data[0] = base_types::convertor<T2, U2>::convert(U2{src[{row, col}], src[{row+1, col}]});
                 dst.tiles[i][j].data[1] = base_types::convertor<T2, U2>::convert(U2{src[{row+2, col}], src[{row+3, col}]});
-
                 dst.tiles[i][j].data[2] = base_types::convertor<T2, U2>::convert(U2{src[{row+4, col}], src[{row+5, col}]});
                 dst.tiles[i][j].data[3] = base_types::convertor<T2, U2>::convert(U2{src[{row+6, col}], src[{row+7, col}]});
             }
