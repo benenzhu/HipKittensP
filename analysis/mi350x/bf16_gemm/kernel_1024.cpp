@@ -3,7 +3,7 @@
 #include "utils.cpp"
 using namespace kittens;
 
-constexpr int BLOCK_SIZE       = 64;  
+constexpr int BLOCK_SIZE       = 128;  
 constexpr int K_STEP           = 64;
 constexpr int REG_BLOCK_M      = BLOCK_SIZE / 2;
 constexpr int REG_BLOCK_N      = BLOCK_SIZE / 4;
