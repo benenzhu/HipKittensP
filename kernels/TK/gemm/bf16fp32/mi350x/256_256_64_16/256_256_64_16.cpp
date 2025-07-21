@@ -56,7 +56,7 @@ void micro_tk(const micro_globals g) {
     // Swizzle chiplet so that wgids are in the same XCD.
     wgid = (wgid % NUM_XCDS) * (NUM_WGS / NUM_XCDS) + (wgid / NUM_XCDS);
     // Swizzle for better L2 within the same XCD.
-    const int WGM = 4;
+    const int WGM = 8;
     const int num_pid_m = ceil_div(M, BLOCK_SIZE);
     const int num_pid_n = ceil_div(N, BLOCK_SIZE);
     int num_wgid_in_group = WGM * num_pid_n;
