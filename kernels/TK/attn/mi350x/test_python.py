@@ -22,7 +22,7 @@ torch.set_printoptions(
 
 # Inputs
 B = 16
-H = 32
+H = 16
 N = 4096
 D = 64
 causal = False
