@@ -114,7 +114,6 @@ __global__ void attend_ker(const attn_globals<D> g) {
 
             load_lds_reg(k_reg, subtile_inplace<BLOCK_SIZE, ATTN_D>(k_smem[tic], {i, 0}));
             load_lds_reg_col(v_reg, subtile_inplace<BLOCK_SIZE, ATTN_D>(v_smem[tic], {i, 0}));
-            asm volatile("s_waitcnt lgkmcnt(0)\n");
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_sched_barrier(0);
 
@@ -123,6 +122,7 @@ __global__ void attend_ker(const attn_globals<D> g) {
             // Store previous max values
             copy(max_vec_prev, max_vec);
             // A = Q @ K.T (now temperature is fully applied)
+            asm volatile("s_waitcnt lgkmcnt(8)\n");
             k_reg_transposed = swap_layout_and_transpose_inplace(k_reg);
             mma_AtB(att_block, k_reg_transposed, q_reg_transposed, att_block);
 
@@ -145,6 +145,7 @@ __global__ void attend_ker(const attn_globals<D> g) {
             // Update running output
             mul_col(o_reg, o_reg, max_vec_prev);
             // O += A @ V
+            asm volatile("s_waitcnt lgkmcnt(0)\n");
             mma_AtB(o_reg, v_reg, att_block_col_bf16, o_reg);
         }
     }
