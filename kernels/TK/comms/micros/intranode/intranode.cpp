@@ -1,6 +1,7 @@
 #include "kittens.cuh"
 #include "utils.cpp"
 #include <random>
+#include <chrono>
 
 constexpr int NUM_DEVICES = 8;
 constexpr size_t N = 4096;
@@ -54,12 +55,15 @@ int main() {
         for (int i = 0; i < nelem; ++i)
             host_mats_bf16[dev_idx][i] = __float2bfloat16(host_mats[dev_idx][i]);
     }
+
+    auto cpu_start = std::chrono::high_resolution_clock::now();
     float *expected = new float[nelem];
     for (int i = 0; i < nelem; ++i) {
         expected[i] = 0.0f;
         for (int dev_idx = 0; dev_idx < NUM_DEVICES; ++dev_idx)
             expected[i] += host_mats[dev_idx][i];
     }
+    auto cpu_end = std::chrono::high_resolution_clock::now();
 
     for (int dev_idx = 0; dev_idx < NUM_DEVICES; ++dev_idx) { // Print data
         std::cout << "Device " << dev_idx << ": ";
@@ -120,6 +124,9 @@ int main() {
         std::cout << "Device " << dev << " kernel time: " << ms << " ms" << std::endl;
     }
 
+    std::chrono::duration<double, std::milli> cpu_time = cpu_end - cpu_start;
+    std::cout << "[CPU] All-reduce time: " << cpu_time.count() << " ms" << std::endl;
+
     // Convert back to float and verify
     int device_id = 1;
     float* result_host = new float[nelem];
@@ -145,7 +152,7 @@ int main() {
         hipEventDestroy(start[dev]);
         hipEventDestroy(stop[dev]);
     }
-    
+
     for (int dev = 0; dev < NUM_DEVICES; ++dev) {
         hipFree(dev_mats[dev]);
         hipFree(dev_output[dev]);
