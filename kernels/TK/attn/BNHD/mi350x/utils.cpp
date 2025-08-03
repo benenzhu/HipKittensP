@@ -80,12 +80,20 @@ __device__ inline void load_global_to_shared_direct(
 {
 
     using T = typename ST::dtype;
-    constexpr int memcpy_per_tile = ST::rows * ST::cols * sizeof(T) / (16 * N_THREADS); // 2
+    constexpr int memcpy_per_tile =  ST::rows * ST::cols * sizeof(T) / (16 * N_THREADS); // 16 --> 32
     static_assert(memcpy_per_tile > 0, "memcpy_per_tile must be greater than 0. Please decrease the number of threads.");
     
     constexpr int elem_per_thread = 16 / sizeof(T);  // 8
-    constexpr int elem_per_warp = elem_per_thread * kittens::WARP_THREADS;
+    constexpr int elem_per_warp = elem_per_thread * kittens::WARP_THREADS; // 512
     constexpr int threads_per_row = ST::cols / elem_per_thread; 
+
+    // int condition = (threadIdx.x == 0 && blockIdx.x == 0 && blockIdx.y == 0);
+    // if (condition) {
+    //     printf("elem_per_thread: %d\n", elem_per_thread);
+    //     printf("elem_per_warp: %d\n", elem_per_warp);
+    //     printf("threads_per_row: %d\n", threads_per_row); // 16 --> 32
+    //     printf("ST::cols: %d\n", ST::cols);
+    // }
 
     const int row_stride = src.template stride<axis>();
     coord<> unit_coord = idx.template unit_coord<axis, 3>();
@@ -260,6 +268,15 @@ __device__ inline static void load_lds_reg(RT &dst, const ST &src) {
         else {
             row_offset = row_offset + k*16;
         }
+
+        // int condition = (threadIdx.x == 0 && blockIdx.x == 0 && blockIdx.y == 0);
+
+        // if (condition) {
+        //     printf("dst.tile_size_row: %d\n", dst.tile_size_row);
+        //     printf("dst.tile_size_col: %d\n", dst.tile_size_col);
+        //     printf("row_offset: %d\n", row_offset);
+        //     printf("col_offset: %d\n", col_offset);
+        // }
 
         #pragma unroll
         for(int j = 0; j < dst.width; j++) {

@@ -4,6 +4,7 @@ import random
 import time
 import math
 from torch.nn.functional import scaled_dot_product_attention
+import aiter
 from aiter.ops.triton.mha import flash_attn_func
 
 profiling = True
@@ -22,10 +23,10 @@ torch.set_printoptions(
 
 # Inputs
 B = 16
-H = 16
-H_KV = 16
-N = 4096
-D = 64
+H = 64
+H_KV = 8
+N = 8192
+D = 128
 causal = False
 dtype = torch.bfloat16
 q = torch.randn(B, N, H, D, dtype=dtype, device='cuda', requires_grad=True)
@@ -103,34 +104,15 @@ flops_ref = flops(B, N, H, D, causal)
 
 if profiling:
 
-    # # Reference matmul using PyTorch
-    # for _ in range(num_warmup):
-    #     out_ref_pytorch = scaled_dot_product_attention(q, k, v, is_causal=causal)
-    # timings_ref = []
-    # for _ in range(num_iters):
-    #     torch.cuda.synchronize()
-    #     start_event.record()
-    #     out_ref_pytorch = scaled_dot_product_attention(q, k, v, is_causal=causal)
-    #     end_event.record()
-    #     torch.cuda.synchronize()
-    #     elapsed_time = start_event.elapsed_time(end_event)
-    #     timings_ref.append(elapsed_time)
-    # if profiling:
-    #     print(f"{out_ref_pytorch.dtype=}")
-    #     avg_time_ref = sum(timings_ref) / len(timings_ref)
-    #     eff_ref = efficiency(flops_ref, avg_time_ref)
-    #     print(f"PyTorch reference average execution time: {avg_time_ref:.4f} ms")
-    #     print(f"PyTorch reference performance: {eff_ref:.2f} TFLOPS for {B=} {H=} {N=} {D=} {causal=}.\n")
-
     # Reference matmul using AITER
     if using_aiter:
         for _ in range(num_warmup):
-            out_ref = flash_attn_func(q, k, v)
+            out_ref = aiter.flash_attn_func(q, k, v, causal=causal, return_lse=True, deterministic=True)
         timings_ref = []
         for _ in range(num_iters):
             torch.cuda.synchronize()
             start_event.record()
-            out_ref = flash_attn_func(q, k, v)
+            out_ref = aiter.flash_attn_func(q, k, v, causal=causal, return_lse=True, deterministic=True)
             end_event.record()
             torch.cuda.synchronize()
             elapsed_time = start_event.elapsed_time(end_event)
