@@ -95,7 +95,7 @@ enum initializers {
     ARANGE = 1, // write an increasing sequence into i_ref and d_i arrays. useful for debugging memory movement.
     NONE   = 2  // use whatever values were already in i_ref. useful for detailed debugging.
 };
-template<typename T, initializers initializer=initializers::ARANGE, int SEED=42>
+template<typename T, initializers initializer=initializers::RANDOM, int SEED=42>
 void initialize(T **d_i, T **d_o, std::vector<float> &i_ref, std::vector<float> &o_ref) {
     using namespace kittens;
 
@@ -181,11 +181,10 @@ test_result validate(T *d_i, T *d_o, const std::vector<float> &i_ref, std::vecto
         }
     }
     // check
-    std::cout << "test `" << test_name << "` ";// << " has output size " << output_size;
+    std::cout << "test `" << test_name << "` ";
     bool good = true;
     for(int i = 0; i < output_size; i++) {
         if(abs(o_ref[i] - o[i]) > eps) {
-            // std::cout << "failed at index " << i << " o_ref[i] = " << o_ref[i] << " o[i] = " << o[i];
             good = false;
             break;
         }

@@ -14,14 +14,15 @@ struct g2r_wrapper_2d {
         this_result.label = generate_test_name<H,W,NUM_WORKERS,args...>(test::test_identifier);
         if constexpr (test::template valid<H, W, NUM_WORKERS, args...>::value) {
             constexpr int B = 1, D = 1, R = 1, C = 1;
-            constexpr int SIZE = H*W*512 * B * D * R * C;
+            constexpr int EPT = 2*(std::is_same_v<dtype, kittens::fp8e4m3> ? 4 : 2); // elements per thread during load/store
+            constexpr int SIZE = H*W*EPT*64 * B * D * R * C;
             // initialize
             dtype *d_i, *d_o;
             std::vector<float> i_ref(SIZE);
             std::vector<float> o_ref(SIZE);
             initialize(&d_i, &d_o, i_ref, o_ref);
             // make descriptors
-            using GL = typename kittens::gl<dtype, -1, D, -1, 32*C*W>;
+            using GL = typename kittens::gl<dtype, -1, D, -1, 4*C*W*EPT>;
             GL input (d_i, B, nullptr, 16*R*H, nullptr);
             GL output(d_o, B, nullptr, 16*R*H, nullptr);
             // run kernel
@@ -34,7 +35,7 @@ struct g2r_wrapper_2d {
             // fill in correct results on cpu
             test::template host_func<H, W, NUM_WORKERS, GL, args...>(i_ref, o_ref);
             // check and cleanup
-            this_result.result = validate(d_i, d_o, i_ref, o_ref, this_result.label, W*32);
+            this_result.result = validate(d_i, d_o, i_ref, o_ref, this_result.label, W*EPT*4);
         }
         else {
             this_result.result = test_result::INVALID;
@@ -45,35 +46,26 @@ struct g2r_wrapper_2d {
 template<typename test, int MAX_H=8, int MAX_W=8, int NUM_WORKERS=1, typename... args> using g2r_sweep_size_2d = loop_h<g2r_wrapper_2d, test, MAX_H, MAX_W, NUM_WORKERS, MAX_H, args...>;
 template<typename test, int MAX_H=8, int MAX_W=8, typename... args> using g2r_sweep_size_2d_warp = g2r_sweep_size_2d<test, MAX_H, MAX_W, 1, args...>;
 
+// Type tags for specifying register tile type
+struct use_fp8e4m3_tag {};
+struct use_default_tag {};
+
 template<typename T>
 struct load_store {
     using dtype = T;
-    template<int H, int W, int NW, kittens::ducks::rt_layout::all L> using valid = std::bool_constant<NW == 1 && W*H<=64>; // this is warp-level
+    template<int H, int W, int NW, kittens::ducks::rt_layout::all L, typename... args> using valid = std::bool_constant<NW == 1 && W*H<=64>; // this is warp-level
     static inline const std::string test_identifier = std::is_same_v<T, kittens::bf16> ? "reg_loadstore_gmem=bf16" :
                                                       std::is_same_v<T, kittens::half> ? "reg_loadstore_gmem=half" :
                                                       std::is_same_v<T, kittens::fp8e4m3> ? "reg_loadstore_gmem=fp8e4m3" :
                                                                                          "reg_loadstore_gmem=float";
-    template<int H, int W, int NW, kittens::ducks::gl::all GL, kittens::ducks::rt_layout::all L> __host__ static void host_func(const std::vector<float> &i_ref, std::vector<float> &o_ref) {
+    template<int H, int W, int NW, kittens::ducks::gl::all GL, kittens::ducks::rt_layout::all L, typename... args> __host__ static void host_func(const std::vector<float> &i_ref, std::vector<float> &o_ref) {
         o_ref = i_ref; // overwrite the whole thing
     }
-    template<int H, int W, int NW, kittens::ducks::gl::all GL, kittens::ducks::rt_layout::all L> __device__ static void device_func(const GL input, const GL output) {
-        kittens::rt_fp8e4m3<16*H, 32*W, L> reg_tile;
-        if (kittens::warpid() == 0 && kittens::laneid() == 0) {
-            printf("input rows: %d, reg_tile rows: %d, reg_tile cols: %d, input cols: %d\n", input.rows(), reg_tile.rows, reg_tile.cols, input.cols());
-        }
+    template<int H, int W, int NW, kittens::ducks::gl::all GL, kittens::ducks::rt_layout::all L, typename RT_SELECT = use_default_tag> __device__ static void device_func(const GL input, const GL output) {
+        using RT_T = std::conditional_t<std::is_same_v<RT_SELECT, use_fp8e4m3_tag>, kittens::rt_fp8e4m3<16*H, 32*W, L>, kittens::rt_bf<16*H, 16*W, L>>;
+        RT_T reg_tile;
         for(int i = 0; i < input.batch(); i++) for(int j = 0; j < input.depth(); j++) for(int k = 0; k < input.rows()/reg_tile.rows; k++) for(int l = 0; l < input.cols()/reg_tile.cols; l++) {
             kittens::load(reg_tile, input, {i, j, k, l});
-            __syncthreads();
-            if (kittens::warpid() == 0 && kittens::laneid() == 1) {
-                kittens::fp8e4m3_4 tmp = reg_tile.tiles[0][0].data[1];
-                float4 f4 = kittens::base_types::convertor<float4, kittens::fp8e4m3_4>::convert(tmp);
-                printf("reg_tile: %f\n", kittens::base_types::convertor<float, kittens::fp8e4m3>::convert(f4.x));
-            }
-            if (kittens::warpid() == 0 && kittens::laneid() == 17) {
-                kittens::fp8e4m3_4 tmp = reg_tile.tiles[0][0].data[1];
-                float4 f4 = kittens::base_types::convertor<float4, kittens::fp8e4m3_4>::convert(tmp);
-                printf("reg_tile: %f\n", kittens::base_types::convertor<float, kittens::fp8e4m3>::convert(f4.x));
-            }
             kittens::store(output, reg_tile, {i, j, k, l});
         }
     }
@@ -81,15 +73,18 @@ struct load_store {
 
 void warp::memory::tile::global_to_register::tests(test_data &results) {
     std::cout << "\n ----- Starting ops/warp/memory/tile/global_to_register tests! -----\n" << std::endl;
-    constexpr int SIZE = 1;
+    constexpr int SIZE = INTENSITY_1 ? 2  :
+                         INTENSITY_2 ? 4  : 
+                         INTENSITY_3 ? 8  :
+                         INTENSITY_4 ? 16 : -1;
                          
-    // g2r_sweep_size_2d_warp<load_store<float>, SIZE, SIZE, kittens::ducks::rt_layout::row>::run(results);
-    // g2r_sweep_size_2d_warp<load_store<float>, SIZE, SIZE, kittens::ducks::rt_layout::col>::run(results);
-    // g2r_sweep_size_2d_warp<load_store<kittens::bf16>, SIZE, SIZE, kittens::ducks::rt_layout::row>::run(results);
-    // g2r_sweep_size_2d_warp<load_store<kittens::bf16>, SIZE, SIZE, kittens::ducks::rt_layout::col>::run(results);
-    // g2r_sweep_size_2d_warp<load_store<kittens::half>, SIZE, SIZE, kittens::ducks::rt_layout::row>::run(results);
-    // g2r_sweep_size_2d_warp<load_store<kittens::half>, SIZE, SIZE, kittens::ducks::rt_layout::col>::run(results);
-    g2r_sweep_size_2d_warp<load_store<kittens::fp8e4m3>, SIZE, SIZE, kittens::ducks::rt_layout::row>::run(results);
+    g2r_sweep_size_2d_warp<load_store<float>, SIZE, SIZE, kittens::ducks::rt_layout::row>::run(results);
+    g2r_sweep_size_2d_warp<load_store<float>, SIZE, SIZE, kittens::ducks::rt_layout::col>::run(results);
+    g2r_sweep_size_2d_warp<load_store<kittens::bf16>, SIZE, SIZE, kittens::ducks::rt_layout::row>::run(results);
+    g2r_sweep_size_2d_warp<load_store<kittens::bf16>, SIZE, SIZE, kittens::ducks::rt_layout::col>::run(results);
+    g2r_sweep_size_2d_warp<load_store<kittens::half>, SIZE, SIZE, kittens::ducks::rt_layout::row>::run(results);
+    g2r_sweep_size_2d_warp<load_store<kittens::half>, SIZE, SIZE, kittens::ducks::rt_layout::col>::run(results);
+    g2r_sweep_size_2d_warp<load_store<kittens::fp8e4m3>, SIZE, SIZE, kittens::ducks::rt_layout::row, use_fp8e4m3_tag>::run(results);
 }
 
 #endif

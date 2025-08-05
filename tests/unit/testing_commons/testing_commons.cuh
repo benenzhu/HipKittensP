@@ -73,7 +73,7 @@ template<int H, int W, int NW, integral_wrapper _K> std::string generate_test_na
     }
     return label;
 }
-template<int H, int W, int NW, kittens::ducks::rt_layout::all L> std::string generate_test_name(std::string test_id) {
+template<int H, int W, int NW, kittens::ducks::rt_layout::all L, typename... args> std::string generate_test_name(std::string test_id) {
     std::string label = generate_test_name<H,W,NW>(test_id);
     if constexpr (std::is_same_v<L, kittens::ducks::rt_layout::row>) label += "_[rt_row_layout]";
     else label += "_[rt_col_layout]";

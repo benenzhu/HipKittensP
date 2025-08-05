@@ -45,7 +45,7 @@ __device__ inline static void load(RT &dst, const GL &src, const COORD &idx) {
     int row_offset = laneid%32, col_offset = 8*(laneid/32);
     int REPEAT = 2;
     #else
-    int row_offset = laneid%16, col_offset = 8*(laneid/16);
+    int row_offset = laneid%16, col_offset = 2*base_types::packing<U2>::num()*(laneid/16);
     int REPEAT = 1;
     #endif
     
@@ -113,15 +113,6 @@ __device__ inline static void load(RT &dst, const GL &src, const COORD &idx) {
                 for(int k = 0; k < 2; k++) {
                     dst.tiles[i][j].data[k] = base_types::convertor<T2, U2>::convert(tmp[k]);
                 }
-                float4 f4 = kittens::base_types::convertor<float4, fp8e4m3_4>::convert(dst.tiles[i][j].data[0]);
-                // if (blockIdx.x == 0 && threadIdx.x == 0) {
-                //     printf("dst.tiles[%d][%d].data[0]: %f\n", i, j, float(f4.x));
-                //     printf("dst.tiles[%d][%d].data[1]: %f\n", i, j, float(f4.y));
-                // }
-                // if (blockIdx.x == 0 && threadIdx.x == 16) {
-                //     printf("dst.tiles[%d][%d].data[0]: %f\n", i, j, float(f4.x));
-                //     printf("dst.tiles[%d][%d].data[1]: %f\n", i, j, float(f4.y));
-                // }
                 #endif
 
             }
@@ -253,7 +244,7 @@ __device__ inline static void store(const GL &dst, const RT &src, const COORD &i
     int row_offset = laneid%32, col_offset = 8*(laneid/32);
     int REPEAT = 2;
     #else
-    int row_offset = laneid%16, col_offset = 8*(laneid/16);
+    int row_offset = laneid%16, col_offset = 2*base_types::packing<U2>::num()*(laneid/16);
     int REPEAT = 1;
     #endif
 
