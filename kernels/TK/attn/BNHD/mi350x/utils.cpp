@@ -513,10 +513,8 @@ __device__ inline static void load_lds_reg_col_new(RT &dst, const ST &src) {
     const int laneid = kittens::laneid();
     const int row_offset = (laneid % 16) / 4 + (laneid / 32) * 8;
     const int col_offset = ((laneid % 4) * 4) + 16*((laneid % 32)/16);
-    const int subtile_offset0 = row_offset * kittens::TILE_ROW_DIM<U> + col_offset;
-    const uint32_t addr0 = reinterpret_cast<uintptr_t>(&src.data[subtile_offset0]);
-    const int subtile_offset1 = (row_offset + 4) * kittens::TILE_ROW_DIM<U> + col_offset;
-    const uint32_t addr1 = reinterpret_cast<uintptr_t>(&src.data[subtile_offset1]);
+    const int subtile_offset = row_offset * kittens::TILE_ROW_DIM<U> + col_offset;
+    const uint32_t addr = reinterpret_cast<uintptr_t>(&src.data[subtile_offset]);
 
     const int subtile_stride = kittens::TILE_ROW_DIM<U> * kittens::TILE_COL_DIM<U> * sizeof(U) / 2;
     const int tile_stride = subtile_stride * 2;
@@ -529,12 +527,13 @@ __device__ inline static void load_lds_reg_col_new(RT &dst, const ST &src) {
             #pragma unroll 
             for (int k = 0; k < 2; k++) {
                 asm volatile(
-                    "ds_read_b64_tr_b16 %0, %2 offset:%4\n"
-                    "ds_read_b64_tr_b16 %1, %3 offset:%4\n"
+                    "ds_read_b64_tr_b16 %0, %2 offset:%3\n"
+                    "ds_read_b64_tr_b16 %1, %2 offset:%4\n"
                     : "=v"(*reinterpret_cast<float2*>(&dst.tiles[i][j].data[k*4])), 
                     "=v"(*reinterpret_cast<float2*>(&dst.tiles[i][j].data[k*4 + 2]))
-                    : "v"(addr0), "v"(addr1),
-                    "i"(i * row_stride + j * tile_stride + k * subtile_stride)
+                    : "v"(addr),
+                    "i"(i * row_stride + j * tile_stride + k * subtile_stride),
+                    "i"(i * row_stride + j * tile_stride + k * subtile_stride + (4 * kittens::TILE_ROW_DIM<U> * sizeof(U)))
                     : "memory"
                 );  
             }
