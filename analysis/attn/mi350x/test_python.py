@@ -5,7 +5,7 @@ import time
 import math
 import sys
 from torch.nn.functional import scaled_dot_product_attention
-from aiter.ops.triton.mha import flash_attn_func
+import aiter
 
 profiling = True
 using_aiter = True
@@ -23,14 +23,15 @@ torch.set_printoptions(
 
 # Inputs
 B = 16
-H = 16
+H = 64
+H_KV = 8
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 1024
-D = 64
+D = 128
 causal = False
 dtype = torch.bfloat16
 q = torch.randn(B, N, H, D, dtype=dtype, device='cuda', requires_grad=True)
-k = torch.randn(B, N, H, D, dtype=dtype, device='cuda', requires_grad=True)
-v = torch.randn(B, N, H, D, dtype=dtype, device='cuda', requires_grad=True)
+k = torch.randn(B, N, H_KV, D, dtype=dtype, device='cuda', requires_grad=True)
+v = torch.randn(B, N, H_KV, D, dtype=dtype, device='cuda', requires_grad=True)
 
 
 def flops(batch, seqlen, nheads, headdim, causal, mode="fwd"):
@@ -128,12 +129,12 @@ if profiling:
     # Reference matmul using AITER
     if using_aiter:
         for _ in range(num_warmup):
-            out_ref = flash_attn_func(q, k, v)
+            out_ref = aiter.flash_attn_func(q, k, v, causal=causal, return_lse=True, deterministic=True)
         timings_ref = []
         for _ in range(num_iters):
             torch.cuda.synchronize()
             start_event.record()
-            out_ref = flash_attn_func(q, k, v)
+            out_ref = aiter.flash_attn_func(q, k, v, causal=causal, return_lse=True, deterministic=True)
             end_event.record()
             torch.cuda.synchronize()
             elapsed_time = start_event.elapsed_time(end_event)

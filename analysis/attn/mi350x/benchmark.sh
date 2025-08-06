@@ -9,6 +9,3 @@ python test_python.py 4096
 
 make TARGET=tk_kernel SRC=kernel_8192.cpp
 python test_python.py 8192
-
-make TARGET=tk_kernel SRC=kernel_16384.cpp
-python test_python.py 16384
