@@ -21,12 +21,21 @@ struct micro_globals {
 
 __global__ __launch_bounds__(NUM_THREADS, 1)
 void micro_tk(const micro_globals g) {
+    // if (threadIdx.x  == 0 && blockIdx.x == 0) {
+    //     printf("sizeof(fp6_e2m3): %zu\n", sizeof(fp6_e2m3));
+    //     printf("sizeof(float): %zu\n", sizeof(float));
+    //     printf("fp6 TILE_COL_DIM: %d\n", kittens::TILE_COL_DIM<fp6_e2m3>);
+    //     printf("float TILE_COL_DIM: %d\n", kittens::TILE_COL_DIM<float>);
+    //     // printf("fp6 packed_per_thread: %d\n", src.tiles[0][0].packed_per_thread);
+    //     // printf("float packed_per_thread: %d\n", dst.tiles[0][0].packed_per_thread);
+    //     // printf("src width: %d, dst width: %d\n", src.width, dst.width);
+    // }
+
+
     rt_fl<SIZE, SIZE> tile_fl;
-    // rt_fl<SIZE, SIZE> tile_fl;
-    // rt_f6<SIZE, SIZE> tile_f6;
-    // one(tile_f6);
-    // copy(tile_fl, tile_f6);
-    one(tile_fl);
+    rt_f6<SIZE, SIZE> tile_f6;
+    one(tile_f6);
+    copy(tile_fl, tile_f6);
     store(g.output, tile_fl, {0, 0, 0, 0});
 }
 

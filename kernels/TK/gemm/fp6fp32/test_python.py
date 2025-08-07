@@ -36,4 +36,3 @@ print(output[:32, :32])
 print("reference sample:")
 print(C_ref[:32, :32])
 
-breakpoint()
