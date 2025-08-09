@@ -3,7 +3,7 @@
 
 using namespace kittens;
 
-#define DUMP_TO_CSV
+// #define DUMP_TO_CSV
 
 #define HipCheckError()    __hipCheckError( __FILE__, __LINE__ )
 inline void __hipCheckError( const char *file, const int line ) {
@@ -46,34 +46,43 @@ template <int M, int N, int K>
 __global__ void matmul(const kittens::gl<fp8e4m3, 1, 1, M, K> A, const kittens::gl<fp8e4m3, 1, 1, N, K> B, const kittens::gl<float, 1, 1, M, N> C) {
     static_assert(M % 64 == 0, "M must be a multiple of 64");
     static_assert(N % 64 == 0, "N must be a multiple of 64");
-    static_assert(K % 64 == 0, "K must be a multiple of 128");
+    static_assert(K % 64 == 0, "K must be a multiple of 64");
 
     constexpr int k_iters = K / 64;
-    constexpr int n_iters = N / 64;
-    constexpr int m_iters = M / 64;
+    constexpr int n_iters = N / 64; // thread-block iters
+    constexpr int m_iters = M / 64; // thread-block iters
 
     rt_fp8e4m3<32, 64> a;
     rt_fp8e4m3<32, 64> b;
     rt_fl<32, 32, kittens::ducks::rt_layout::accumulator> c;
-    int iter = 0;
-    int i = gridDim.x * iter + blockIdx.x;
-    constexpr int warps_per_block_dim = 2;
-    int i_m = i % m_iters * warps_per_block_dim + warpid() / warps_per_block_dim;
-    int i_n = i / m_iters * warps_per_block_dim + warpid() % warps_per_block_dim;
 
-    zero(c);
-    for (int k = 0; k < k_iters; k++) {
-        load(a, A, {0, 0, i_m, k});
-        load(b, B, {0, 0, i_n, k});
-        mma_ABt(c, a, b, c);
-        store(C, c, {0, 0, i_m, i_n});
+    constexpr int total_iters = n_iters * m_iters;
+
+    for (int i = blockIdx.x; i < total_iters; i += gridDim.x) {
+        constexpr int warps_per_block_dim = 2;
+        // Convert linear block index to 2D coordinates in the grid
+        int block_m = i / n_iters;  // which row of blocks
+        int block_n = i % n_iters;  // which column of blocks
+        
+        // Map warps within the block to sub-blocks
+        int i_m = block_m * warps_per_block_dim + warpid() / warps_per_block_dim;
+        int i_n = block_n * warps_per_block_dim + warpid() % warps_per_block_dim;
+
+        zero(c);
+        for (int k = 0; k < k_iters; k++) {
+            load(a, A, {0, 0, i_m, k});
+            load(b, B, {0, 0, i_n, k});
+            mma_ABt(c, a, b, c);
+            store(C, c, {0, 0, i_m, i_n});
+        }
     }
 }
 
 int main() {
-    constexpr int M = 32*16*2;
-    constexpr int N = 32*16*2;
-    constexpr int K = 128;
+    // Allow different M and N dimensions
+    constexpr int M = 256;  // Can be any multiple of 64
+    constexpr int N = 128;  // Can be any multiple of 64
+    constexpr int K = 64;
     constexpr int threads_per_warp = 64;
     constexpr int warps_per_cu = 4;
     constexpr int threads_per_block = threads_per_warp * warps_per_cu;
@@ -88,20 +97,14 @@ int main() {
 
     std::vector<fp8e4m3> a_host(M*K);
     std::vector<fp8e4m3> b_host(N*K);
-    // Randomly initialize a_host and b_host with values in [-1.0, 1.0]
+    // Randomly initialize b_host with values in [-1.0, 1.0]
     std::mt19937 gen(42); // Fixed seed for reproducibility
     std::uniform_real_distribution<float> dis(-1.0f, 1.0f);
     std::vector<float> c_ref(M*N, 0.0f);
-    for (int i = 0; i < M*K; i++) {
+    
+    // Initialize b_host (N x K matrix)
+    for (int i = 0; i < N*K; i++) {
         b_host[i] = fp8e4m3(dis(gen));
-        // b_host is N x K, row-major: b_host[j*K + k]
-        // We want c_ref[i*N + j] = float(b_host[j*K + i]) for i in [0, M), j in [0, N)
-        // So for each i in [0, M*K), if i = j*K + k, then j = i/K, k = i%K
-        int j = i / K;
-        int k = i % K;
-        if (k < M && j < N) {
-            c_ref[k*N + j] = float(b_host[j*K + k]);
-        }
     }
 
     // Initialize a_host to identity matrix
@@ -116,6 +119,21 @@ int main() {
             }
         }
     }
+    
+    // Compute reference result: C = A * B^T
+    // A is M x K (identity in first min(M,K) diagonal), B is N x K
+    // C should be M x N
+    for (int i = 0; i < M; ++i) {
+        for (int j = 0; j < N; ++j) {
+            float sum = 0.0f;
+            for (int k = 0; k < K; ++k) {
+                float a_val = float(a_host[i*K + k]);
+                float b_val = float(b_host[j*K + k]);
+                sum += a_val * b_val;
+            }
+            c_ref[i*N + j] = sum;
+        }
+    }
 
     hipMemcpy(d_a, a_host.data(), M*K*sizeof(fp8e4m3), hipMemcpyHostToDevice);
     hipMemcpy(d_b, b_host.data(), N*K*sizeof(fp8e4m3), hipMemcpyHostToDevice);
@@ -127,32 +145,11 @@ int main() {
     matmul<M, N, K><<<CUs, threads_per_block>>>(A, B, C);
     HipCheckError();
 
-    // Host-side matmul: c_ref = a_host * b_host (A: 32x64, B: 32x64, C: 32x32)
-    // std::vector<float> c_ref(M*N, 0.0f);
-    // for (int i = 0; i < M; ++i) {
-    //     for (int j = 0; j < N; ++j) {
-    //         float sum = 0.0f;
-    //         for (int k = 0; k < K; ++k) {
-    //             // Convert fp8e4m3 to float for computation
-    //             float a_val = float(a_host[i*K + k]);
-    //             float b_val = float(b_host[j*K + k]);
-    //             sum += a_val * b_val;
-    //         }
-    //         c_ref[i*N + j] = sum;
-    //     }
-    // }
-
     std::vector<float> c_host(M*N);
     hipMemcpy(c_host.data(), d_c, M*N*sizeof(float), hipMemcpyDeviceToHost);
 
     bool success = true;
-    // for (int i = 0; i < M*N; i++) {
-        // if (abs(c_host[i] - c_ref[i]) > 0.01) {
-        //     printf("Error at index %d: %f vs %f\n", i, c_host[i], c_ref[i]);
-        //     success = false;
-        // }
-    // Check if c_host is equal to b_host (element-wise)
-    // Compare c_host (row major, MxN) to b_host (column major, KxN), but only for the first M rows of b_host (since a_host is identity)
+    // Compare GPU result (c_host) with CPU reference (c_ref)
     for (int row = 0; row < M; ++row) {
         for (int col = 0; col < N; ++col) {
             // c_host is row major: [row*N + col]
