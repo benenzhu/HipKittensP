@@ -9,7 +9,7 @@ using namespace kittens;
 
 
 using din = fp6_e2m3;
-using dout = float;
+using dout = half;
 
 #define HIP_CHECK(x) do { hipError_t _e = (x); if (_e != hipSuccess) { \
     std::cerr << "HIP error " << hipGetErrorString(_e) \
@@ -147,7 +147,7 @@ void micro_tk(const micro_globals g) {
 
     // Epilogue
     // Cluster 0
-    __builtin_amdgcn_sched_barrier(0);
+    // __builtin_amdgcn_sched_barrier(0);
     load_lds_reg_row_fp6(B_tile, subtile_inplace<REG_BLOCK_N, DOT_SLICE>(Bs[tic], {warp_col, 0}));
     load_lds_reg_row_fp6(A_tile, subtile_inplace<REG_BLOCK_M, DOT_SLICE>(As[tic], {warp_row, 0}));
     __builtin_amdgcn_s_barrier();    
@@ -176,6 +176,7 @@ void micro_tk(const micro_globals g) {
     }
 
     store(g.c, C_accum, {0, 0, row * 2 + warp_row, col * 4 + warp_col});
+    // store_fp6_convert(g.c, C_accum, {0, 0, row * 2 + warp_row, col * 4 + warp_col});
 }
 
 
@@ -310,7 +311,7 @@ int main() {
 
     // CPU reference: compute A * B^T
     std::cout << "Computing CPU reference...\n";
-    float *cpu_result = new float[M * N];
+    half *cpu_result = new half[M * N];
     #pragma omp parallel for collapse(2)
     for (int i = 0; i < M; i++) {
         for (int j = 0; j < N; j++) {
@@ -318,7 +319,7 @@ int main() {
             for (int k = 0; k < K; k++) {
                 sum += float(h_input_a[i * K + k]) * float(h_input_b[j * K + k]);
             }
-            cpu_result[i * N + j] = sum;
+            cpu_result[i * N + j] = half(sum);
         }
     }
     
@@ -332,8 +333,8 @@ int main() {
         float h_output_float = float(h_output[i]);
         const float rtol = 0.1f;   // ~u with a little margin
         const float atol = 1e-2f;   // floor for tiny expected values
-        float diff = fabs(cpu_result[i] - h_output_float);
-        float threshold = rtol * fabs(cpu_result[i]) + atol;
+        float diff = fabs(float(cpu_result[i]) - h_output_float);
+        float threshold = rtol * fabs(float(cpu_result[i])) + atol;
         max_diff = std::max(max_diff, diff);
         total_diff += diff;
         if (diff > threshold) {
@@ -341,7 +342,7 @@ int main() {
             if (num_printed < 5) {
                 int row = i / N;
                 int col = i % N;
-                std::cout << "[" << row << "," << col << "] CPU: " << cpu_result[i] 
+                std::cout << "[" << row << "," << col << "] CPU: " << float(cpu_result[i]) 
                           << " GPU: " << h_output_float 
                           << " (diff: " << diff << " / threshold: " << threshold << ")\n";
                 num_printed++;
@@ -350,7 +351,7 @@ int main() {
             if (num_printed_correct < 5) {
                 int row = i / N;
                 int col = i % N;
-                std::cout << "[" << row << "," << col << "] CPU: " << cpu_result[i] 
+                std::cout << "[" << row << "," << col << "] CPU: " << float(cpu_result[i]) 
                           << " GPU: " << h_output_float 
                           << " (diff: " << diff << " / threshold: " << threshold << ")\n";
                 num_printed_correct++;

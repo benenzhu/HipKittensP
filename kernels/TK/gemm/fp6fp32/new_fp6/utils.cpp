@@ -329,8 +329,86 @@ __device__ inline static void store_fp6(const GL &dst, const RT &src, const COOR
         }
     }
 }
-
 template<ducks::rt::all RT, ducks::gl::all GL, ducks::coord::tile COORD=coord<RT>>
 __device__ inline static void store_fp6(const GL &dst, const RT &src, const COORD &idx) {
     store_fp6<2, RT, GL, COORD>(dst, src, idx);
+}
+
+__device__ inline static uint8_t float_to_fp6_bits(float f) {
+    if (f == 0.0f) return 0x00;
+    
+    uint32_t float_bits = __float_as_uint(f);
+    uint32_t sign = (float_bits >> 31) & 0x1;
+    int32_t exp = ((float_bits >> 23) & 0xFF) - 127 + 1;  // Unbias and add E2M3 bias
+    uint32_t mantissa = (float_bits >> 20) & 0x7;
+    
+    if (exp < 0) return (sign << 5);
+    if (exp > 3) return (sign << 5) | 0x1F;
+    
+    return (sign << 5) | ((exp & 0x3) << 3) | mantissa;
+}
+
+template<int axis, ducks::rt::accumulator_layout RT, ducks::gl::all GL, ducks::coord::tile COORD=coord<RT>>
+__device__ inline static void store_fp6_convert(const GL &dst, const RT &src, const COORD &idx) {
+    using T = base_types::packing<typename RT::dtype>::unpacked_type; // float
+    using U = typename GL::dtype;  // fp6_e2m3
+    
+    // Get the base pointer in global memory
+    uint8_t *dst_bytes = (uint8_t*)&dst[(idx.template unit_coord<axis, 3>())];
+    const int row_stride = dst.template stride<axis>();
+    int laneid = kittens::laneid();
+    
+    int col_offset = laneid % 32;
+    int row_offset = laneid / 32;
+    
+    #pragma unroll
+    for(int i = 0; i < src.height; i++) {
+        #pragma unroll
+        for(int j = 0; j < src.width; j++) {
+            int col = src.tile_size_col * j + col_offset;
+            
+            #pragma unroll
+            for (int ii = 0; ii < 4; ii++) {
+                int row = src.tile_size_row * i + ii * 8 + row_offset * 4;
+                
+                // Convert 4 floats to 4 FP6 values (24 bits total)
+                uint8_t fp6_0 = float_to_fp6_bits(src.tiles[i][j].data[ii * 2].x);
+                uint8_t fp6_1 = float_to_fp6_bits(src.tiles[i][j].data[ii * 2].y);
+                uint8_t fp6_2 = float_to_fp6_bits(src.tiles[i][j].data[ii * 2 + 1].x);
+                uint8_t fp6_3 = float_to_fp6_bits(src.tiles[i][j].data[ii * 2 + 1].y);
+                
+                // Pack and store these 4 FP6 values (24 bits)
+                // Calculate bit positions for each value
+                int elem0_bit = ((row + 0) * row_stride + col) * 6;
+                int elem1_bit = ((row + 1) * row_stride + col) * 6;
+                int elem2_bit = ((row + 2) * row_stride + col) * 6;
+                int elem3_bit = ((row + 3) * row_stride + col) * 6;
+                
+                // Use 32-bit atomic operations to update the packed data
+                uint32_t *dst_words = (uint32_t*)dst_bytes;
+                
+                // Helper lambda to pack a single FP6 value
+                auto pack_fp6 = [&](int bit_pos, uint8_t fp6_val) {
+                    int word_idx = bit_pos / 32;
+                    int bit_off = bit_pos % 32;
+                    
+                    atomicOr(&dst_words[word_idx], uint32_t(fp6_val & 0x3F) << bit_off);
+                    
+                    if (bit_off + 6 > 32) {
+                        atomicOr(&dst_words[word_idx + 1], 
+                                uint32_t(fp6_val & 0x3F) >> (32 - bit_off));
+                    }
+                };
+                
+                pack_fp6(elem0_bit, fp6_0);
+                pack_fp6(elem1_bit, fp6_1);
+                pack_fp6(elem2_bit, fp6_2);
+                pack_fp6(elem3_bit, fp6_3);
+            }
+        }
+    }
+}
+template<ducks::rt::all RT, ducks::gl::all GL, ducks::coord::tile COORD=coord<RT>>
+__device__ inline static void store_fp6_convert(const GL &dst, const RT &src, const COORD &idx) {
+    store_fp6_convert<2, RT, GL, COORD>(dst, src, idx);
 }
