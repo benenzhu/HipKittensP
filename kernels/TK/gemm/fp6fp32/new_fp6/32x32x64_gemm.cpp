@@ -1,6 +1,6 @@
 
 #include "kittens.cuh"
-#include "experiment_utils.cpp"
+#include "32x32x64_utils.cpp"
 #include <random>
 #include <omp.h>
 #include <cstring>

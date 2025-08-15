@@ -303,6 +303,84 @@ __device__ inline void load_global_to_shared_direct_with_swizzled_offsets_fp6(
     }
  }
 
+/**
+ * @brief Load data from a shared tile into a register tile.
+ *
+ * @tparam RT The register tile type
+ * @tparam ST The shared tile type
+ * @param dst[out] The destination register tile.
+ * @param src[in]  The source shared tile.
+ */
+ template<ducks::rt::row_layout RT, ducks::st::all ST>
+ __device__ inline static void load_lds_reg_row_fp6_shuffled(RT &dst, const ST &src) {
+ 
+     static_assert(RT::height == ST::height, "register tile and shared tile must match height");
+     static_assert(RT::width  == ST::width,  "register tile and shared tile must match width");
+ 
+     using U  = ST::dtype;
+     const int laneid = kittens::laneid();
+     auto* lds_bytes = reinterpret_cast<const uint8_t*>(&src.data[0]);
+
+     const int row_offset = laneid % 32;
+     const int col_offset = 32 * (laneid / 32);
+     const int byte_offset = (row_offset * kittens::TILE_COL_DIM<U> + col_offset) * 6 / 8;
+     const uint32_t addr = reinterpret_cast<uintptr_t>(lds_bytes + byte_offset);
+
+     const int should_shuffle = (laneid % 32) / 16;
+     const int shuffle_offset = ((1 - (laneid / 32)) * 40) + ((laneid / 32) * -8);
+     const uint32_t addr_b64 = addr + should_shuffle * shuffle_offset;
+
+     const int tile_stride = (kittens::TILE_ROW_DIM<U> * kittens::TILE_COL_DIM<U> * 6 / 8);
+     const int row_stride = tile_stride * src.underlying_width;
+ 
+     #pragma unroll
+     for(int i = 0; i < dst.height; i++) {
+
+        #pragma unroll
+        for(int j = 0; j < dst.width; j++) {
+
+            asm volatile(
+                "ds_read_b128 %0, %2 offset:%3\n"
+                "ds_read_b64 %1, %2 offset:%4\n"
+                : "=v"(*reinterpret_cast<__uint128_t*>(&dst.tiles[i][j].data[0])),
+                  "=v"(*reinterpret_cast<uint64_t*>(reinterpret_cast<uint8_t*>(&dst.tiles[i][j].data[0]) + 16))
+                : "v"(addr),
+                "i"(i * row_stride + j * tile_stride),
+                "i"(i * row_stride + j * tile_stride + 16)
+                : "memory"
+            );
+        }
+    }
+ }
+
+ template<ducks::rt::row_layout RT>
+ __device__ inline static void shuffle_reg_row_fp6(RT &dst) {
+
+    typedef uint32_t      uint2_t __attribute__((ext_vector_type(2)));
+
+    const int laneid = kittens::laneid();
+    const int should_shuffle = (laneid % 32) / 16;
+ 
+     #pragma unroll
+     for(int i = 0; i < dst.height; i++) {
+
+        #pragma unroll
+        for(int j = 0; j < dst.width; j++) {
+
+            uint32_t lo = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(&dst.tiles[i][j].data[0]) + 16);
+            uint32_t hi = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(&dst.tiles[i][j].data[0]) + 20);
+
+            uint2_t res_lo = __builtin_amdgcn_permlane32_swap(lo, lo, false, true);
+            uint2_t res_hi = __builtin_amdgcn_permlane32_swap(hi, hi, false, true);
+
+            *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(&dst.tiles[i][j].data[0]) + 16) = should_shuffle ? res_lo.y : lo;
+            *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(&dst.tiles[i][j].data[0]) + 20) = should_shuffle ? res_hi.y : hi;
+        }
+    }
+ }
+
+
+
  template<int axis, ducks::rt::row_layout RT, ducks::gl::all GL, ducks::coord::tile COORD=coord<RT>>
 __device__ inline static void store_fp6(const GL &dst, const RT &src, const COORD &idx) {
     using T2 = RT::dtype;
