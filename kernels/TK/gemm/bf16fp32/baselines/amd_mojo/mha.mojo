@@ -2532,3 +2532,185 @@ fn mha_gpu_naive[
         ctx,
     )
 
+
+# ===-----------------------------------------------------------------------===#
+# Naive CPU MHA as reference
+# ===-----------------------------------------------------------------------===#
+
+
+fn _naive_attention_with_transpose[
+    type: DType,
+    transpose_k: Bool = False,
+](
+    output: NDBuffer[mut=True, type, 4],
+    q: NDBuffer[type, 4],
+    k: NDBuffer[type, 4],
+    v: NDBuffer[type, 4],
+    mask: NDBuffer[type, 2],
+    scale: Float32,
+) raises:
+    """This kernel provides reference values for flash attention in llama 2.
+    It can't be used in any model.
+    Layouts:
+        q: BSHD
+        k, v: BKHD
+        output: BSHD
+        mask: SK
+    B, S, K, H, D stand for batch size, sequence length, number of keys,
+    number of heads, and depth per head, respectively.
+    """
+    alias simd_size = simdwidthof[type]()
+
+    var batch_size = q.dim[0]()
+    var seq_len = q.dim[1]()
+    var num_keys = k.dim[1]()
+    var num_heads = q.dim[2]()
+    var depth = q.dim[3]()
+
+    # Q, K, V transposed
+    var qt_ptr = UnsafePointer[Scalar[type]].alloc(q.num_elements())
+    var kt_ptr = UnsafePointer[Scalar[type]].alloc(k.num_elements())
+    var vt_ptr = UnsafePointer[Scalar[type]].alloc(v.num_elements())
+    # Score = softmax(Q * K)
+    var score_size = batch_size * num_heads * seq_len * num_keys
+    var score_ptr = UnsafePointer[Scalar[type]].alloc(score_size)
+    # O = Score * V. It's transposed and will be transposed back to output.
+    var ot_ptr = UnsafePointer[Scalar[type]].alloc(output.num_elements())
+
+    var qt = NDBuffer[type, 4](
+        qt_ptr, Index(batch_size, num_heads, seq_len, depth)
+    )
+    var kt = NDBuffer[type, 4](
+        kt_ptr, Index(batch_size, num_heads, depth, num_keys)
+    )
+    var vt = NDBuffer[type, 4](
+        vt_ptr, Index(batch_size, num_heads, num_keys, depth)
+    )
+    var ot = NDBuffer[type, 4](
+        ot_ptr, Index(batch_size, num_heads, seq_len, depth)
+    )
+
+    # BSHD -> BHSD
+    var q_perm = NDBuffer[
+        DType.index, 1, MutableAnyOrigin, 4
+    ].stack_allocation()
+    q_perm[0] = 0
+    q_perm[1] = 2
+    q_perm[2] = 1
+    q_perm[3] = 3
+
+    # BSHD -> BHDS
+    var k_perm = NDBuffer[
+        DType.index, 1, MutableAnyOrigin, 4
+    ].stack_allocation()
+    k_perm[0] = 0
+    k_perm[1] = 2
+    k_perm[2] = 3
+    k_perm[3] = 1
+
+    # BHSD -> BSHD
+    var o_perm = NDBuffer[
+        DType.index, 1, MutableAnyOrigin, 4
+    ].stack_allocation()
+    o_perm[0] = 0
+    o_perm[1] = 2
+    o_perm[2] = 1
+    o_perm[3] = 3
+
+    transpose(qt, q, q_perm.data)
+    transpose(kt, k, k_perm.data)
+    transpose(vt, v, q_perm.data)
+
+    _naive_attention[type, transpose_k](ot, qt, kt, vt, mask, scale)
+
+    transpose(output, ot, o_perm.data)
+
+    qt_ptr.free()
+    kt_ptr.free()
+    vt_ptr.free()
+    score_ptr.free()
+    ot_ptr.free()
+
+
+fn _naive_attention[
+    type: DType,
+    transpose_k: Bool = False,
+](
+    output: NDBuffer[mut=True, type, 4],
+    q: NDBuffer[type, 4],
+    k: NDBuffer[type, 4],
+    v: NDBuffer[type, 4],
+    mask: NDBuffer[type, 2],
+    scale: Float32,
+) raises:
+    """This kernel provides reference values for flash attention in llama 2.
+    It can't be used in any model.
+    """
+    alias simd_size = simdwidthof[type]()
+
+    var batch_size = q.dim[0]()
+    var num_heads = q.dim[1]()
+    var seq_len = q.dim[2]()
+    var num_keys = v.dim[2]()
+
+    # Allocate intermediate memory buffer.
+    var score_size = batch_size * num_heads * seq_len * num_keys
+    var score_ptr = UnsafePointer[Scalar[type]].alloc(score_size)
+    var score = NDBuffer[type, 4](
+        score_ptr, Index(batch_size, num_heads, seq_len, num_keys)
+    )
+
+    batched_matmul[transpose_b=transpose_k](score, q, k)
+
+    @__copy_capture(score)
+    @parameter
+    @always_inline
+    fn scale_and_mask[
+        width: Int, _rank: Int, alignment: Int = 1
+    ](coords: IndexList[_rank]):
+        var vec = score.load[width=width](rebind[IndexList[4]](coords))
+        vec = vec * scale.cast[type]()
+        vec = vec + mask.load[width=width](
+            Index(coords[_rank - 2], coords[_rank - 1])
+        )
+        score.store[width=width](rebind[IndexList[4]](coords), vec)
+
+    elementwise[scale_and_mask, simd_size](score.get_shape())
+
+    softmax[type, simd_size, 4](
+        score,
+        score,
+        axis=3,
+    )
+
+    batched_matmul[transpose_b=False](output, score, v)
+
+    score_ptr.free()
+
+
+@always_inline
+fn managed_tensor_slice_to_ndbuffer[
+    spec: StaticTensorSpec, //
+](tensor: ManagedTensorSlice[static_spec=spec]) -> NDBuffer[
+    spec.dtype,
+    spec.rank,
+    MutableAnyOrigin,
+    spec.shape,
+    spec.strides,
+    alignment = spec.alignment,
+    address_space = spec.address_space,
+    exclusive = spec.exclusive,
+]:
+    var ptr = tensor._ptr.address_space_cast[spec.address_space]()
+    return NDBuffer[
+        spec.dtype,
+        spec.rank,
+        _,
+        spec.shape,
+        spec.strides,
+        alignment = spec.alignment,
+        address_space = spec.address_space,
+        exclusive = spec.exclusive,
+    ](ptr, tensor.shape(), tensor._runtime_strides)
+
+

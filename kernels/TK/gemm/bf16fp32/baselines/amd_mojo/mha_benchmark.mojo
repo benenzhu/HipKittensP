@@ -288,8 +288,8 @@ def main():
         alias qkv_type = DType.bfloat16
         alias mask_type = DType.float32
         alias depth = 128
-        alias num_heads = 16
-        alias group = 1
+        alias num_heads = 64
+        alias group = 8
         alias batch_size = 16
 
         # Medium test case  
