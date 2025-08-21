@@ -82,12 +82,12 @@ void micro_tk(const micro_globals g) {
     constexpr int memcpy_per_tile = BLOCK_SIZE * K_STEP * sizeof(T) / bytes_per_memcpy;
     uint32_t swizzled_offsets_A[memcpy_per_tile];
     uint32_t swizzled_offsets_B[memcpy_per_tile];
-    prefill_swizzled_offsets<2, false, st_bf<BLOCK_SIZE, K_STEP>, _gl_A, NUM_THREADS>(As[tic], g.a, swizzled_offsets_A);
-    prefill_swizzled_offsets<2, false, st_bf<BLOCK_SIZE, K_STEP>, _gl_B, NUM_THREADS>(Bs[tic], g.b, swizzled_offsets_B);
+    G::prefill_swizzled_offsets(As[tic], g.a, swizzled_offsets_A);
+    G::prefill_swizzled_offsets(Bs[tic], g.b, swizzled_offsets_B);
 
     // Load first tile into shared memory
-    load<2, false, st_bf<BLOCK_SIZE, K_STEP>, _gl_A, coord<st_bf<BLOCK_SIZE, K_STEP>>, NUM_THREADS>(As[tic], g.a, {0, 0, row, 0}, swizzled_offsets_A);
-    load<2, false, st_bf<BLOCK_SIZE, K_STEP>, _gl_B, coord<st_bf<BLOCK_SIZE, K_STEP>>, NUM_THREADS>(Bs[tic], g.b, {0, 0, col, 0}, swizzled_offsets_B);
+    G::load(As[tic], g.a, {0, 0, row, 0}, swizzled_offsets_A);  
+    G::load(Bs[tic], g.b, {0, 0, col, 0}, swizzled_offsets_B);
     __builtin_amdgcn_s_waitcnt(0);
     __builtin_amdgcn_s_barrier();
 
@@ -99,10 +99,10 @@ void micro_tk(const micro_globals g) {
     for (int tile = 0; tile < num_tiles - 1; ++tile, tic^=1, toc^=1) {
 
         // Cluster 0
-        load<2, false, st_bf<BLOCK_SIZE, K_STEP>, _gl_A, coord<st_bf<BLOCK_SIZE, K_STEP>>, NUM_THREADS>(As[toc], g.a, {0, 0, row, tile+1}, swizzled_offsets_A);
+        G::load(As[toc], g.a, {0, 0, row, tile+1}, swizzled_offsets_A);
         load(B_tile, subtile_inplace<REG_BLOCK_N, DOT_SLICE>(Bs[tic], {warp_col, 0}));
         load(A_tile, subtile_inplace<REG_BLOCK_M, DOT_SLICE>(As[tic], {warp_row, 0}));
-        load<2, false, st_bf<BLOCK_SIZE, K_STEP>, _gl_B, coord<st_bf<BLOCK_SIZE, K_STEP>>, NUM_THREADS>(Bs[toc], g.b, {0, 0, col, tile+1}, swizzled_offsets_B);
+        G::load(Bs[toc], g.b, {0, 0, col, tile+1}, swizzled_offsets_B);
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
 

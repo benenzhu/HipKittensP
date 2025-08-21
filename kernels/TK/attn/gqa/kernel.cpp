@@ -15,6 +15,8 @@ constexpr int KV_BLOCK_SIZE = 64; // kv block size
 using namespace kittens;
 using _gl_QKVO = gl<bf16, -1, -1, -1, -1>;
 
+using G = kittens::group<NUM_WARPS>;
+
 template<int D, typename T=bf16, typename L=row_l> using qo_tile = rt<T, Q_BLOCK_SIZE, D, L>;
 template<int D, typename T=bf16, typename L=col_l> using qo_tile_transposed = rt<T, D, Q_BLOCK_SIZE, L>;
 template<int D, typename T=bf16, typename L=row_l> using kv_tile = rt<T, KV_BLOCK_SIZE, D, L>;
@@ -68,11 +70,10 @@ __global__ void attend_ker(const attn_globals<D> g) {
 
     uint32_t swizzled_offsets_V[memcpy_per_tile];
     uint32_t swizzled_offsets_K[memcpy_per_tile];
-    prefill_swizzled_offsets<1, false, st_bf<KV_BLOCK_SIZE, ATTN_D, ducks::st_layout::row>, _gl_QKVO, NUM_THREADS>(k_smem[0], g.Kg, swizzled_offsets_K);
-    prefill_swizzled_offsets<1, false, st_bf<KV_BLOCK_SIZE, ATTN_D, ducks::st_layout::accumulator_col>, _gl_QKVO, NUM_THREADS>(v_smem[0], g.Vg, swizzled_offsets_V);
+    G::prefill_swizzled_offsets<1, false>(k_smem[0], g.Kg, swizzled_offsets_K);
+    G::prefill_swizzled_offsets<1, false>(v_smem[0], g.Vg, swizzled_offsets_V);
 
-    load<1, false, st_bf<KV_BLOCK_SIZE, ATTN_D, ducks::st_layout::row>, _gl_QKVO, coord<st_bf<KV_BLOCK_SIZE, ATTN_D, ducks::st_layout::row>>, NUM_THREADS>(
-        k_smem[0], g.Kg, {batch_idx, 0, head_idx_kv, 0}, swizzled_offsets_K);
+    G::load<1, false>(k_smem[0], g.Kg, {batch_idx, 0, head_idx_kv, 0}, swizzled_offsets_K);
 
     // Pre-scale Q by temperature
     qo_tile<D, float> q_reg_fl;
@@ -86,11 +87,9 @@ __global__ void attend_ker(const attn_globals<D> g) {
     neg_infty(max_vec_prev);
 
     // All warps then collaboratively load in the first slice of V (V0) and the second slice of K (K1) into shared memory
-    load<1, false, st_bf<KV_BLOCK_SIZE, ATTN_D, ducks::st_layout::row>, _gl_QKVO, coord<st_bf<KV_BLOCK_SIZE,ATTN_D, ducks::st_layout::row>>, NUM_THREADS>(
-        k_smem[1], g.Kg, {batch_idx, 1, head_idx_kv, 0}, swizzled_offsets_K);
+    G::load<1, false>(k_smem[1], g.Kg, {batch_idx, 1, head_idx_kv, 0}, swizzled_offsets_K);
     // All warps then load in the first slice of K (K0)
-    load<1, false, st_bf<KV_BLOCK_SIZE, ATTN_D, ducks::st_layout::accumulator_col>, _gl_QKVO, coord<st_bf<KV_BLOCK_SIZE,ATTN_D, ducks::st_layout::accumulator_col>>, NUM_THREADS>(
-        v_smem[0], g.Vg, {batch_idx, 0, head_idx_kv, 0}, swizzled_offsets_V);
+    G::load<1, false>(v_smem[0], g.Vg, {batch_idx, 0, head_idx_kv, 0}, swizzled_offsets_V);
     load(k_reg, k_smem[0]);
     swap_layout_and_transpose(k_reg_transposed, k_reg);
     __builtin_amdgcn_s_waitcnt(0);
@@ -116,12 +115,10 @@ __global__ void attend_ker(const attn_globals<D> g) {
     // All warps then load in the second slice of K (K1)
     load(k_reg, k_smem[1]);
     // All warps then collaboratively load in the third slice of K (K2) into shared memory
-    load<1, false, st_bf<KV_BLOCK_SIZE, ATTN_D, ducks::st_layout::row>, _gl_QKVO, coord<st_bf<KV_BLOCK_SIZE,ATTN_D, ducks::st_layout::row>>, NUM_THREADS>(
-        k_smem[0], g.Kg, {batch_idx, 2, head_idx_kv, 0}, swizzled_offsets_K);
+    G::load<1, false>(k_smem[0], g.Kg, {batch_idx, 2, head_idx_kv, 0}, swizzled_offsets_K);
     swap_layout_and_transpose(k_reg_transposed, k_reg);
     // All warps then collaboratively load in the second slice of V (V1) into shared memory 
-    load<1, false, st_bf<KV_BLOCK_SIZE, ATTN_D, ducks::st_layout::accumulator_col>, _gl_QKVO, coord<st_bf<KV_BLOCK_SIZE,ATTN_D, ducks::st_layout::accumulator_col>>, NUM_THREADS>(
-        v_smem[1], g.Vg, {batch_idx, 1, head_idx_kv, 0}, swizzled_offsets_V);
+    G::load<1, false>(v_smem[1], g.Vg, {batch_idx, 1, head_idx_kv, 0}, swizzled_offsets_V);
     __builtin_amdgcn_sched_barrier(0);
     __builtin_amdgcn_s_barrier();
 
@@ -147,8 +144,7 @@ __global__ void attend_ker(const attn_globals<D> g) {
 
         // Cluster 1:
         //      Load K3 into shared 
-        load<1, false, st_bf<KV_BLOCK_SIZE, ATTN_D, ducks::st_layout::row>, _gl_QKVO, coord<st_bf<KV_BLOCK_SIZE,ATTN_D, ducks::st_layout::row>>, NUM_THREADS>(
-            k_smem[1], g.Kg, {batch_idx, j, head_idx_kv, 0});
+        G::load<1, false>(k_smem[1], g.Kg, {batch_idx, j, head_idx_kv, 0});
         //      Load V0 into registers
         load(v_reg, v_smem[0]);
         __builtin_amdgcn_sched_barrier(0);
@@ -173,8 +169,7 @@ __global__ void attend_ker(const attn_globals<D> g) {
 
         // Cluster 3:
         //      Load V2 into shared
-        load<1, false, st_bf<KV_BLOCK_SIZE, ATTN_D, ducks::st_layout::accumulator_col>, _gl_QKVO, coord<st_bf<KV_BLOCK_SIZE,ATTN_D, ducks::st_layout::accumulator_col>>, NUM_THREADS>(
-            v_smem[0], g.Vg, {batch_idx, j - 1, head_idx_kv, 0});
+        G::load<1, false>(v_smem[0], g.Vg, {batch_idx, j - 1, head_idx_kv, 0});
         //      Load K2 into registers
         load(k_reg, k_smem[0]);
         swap_layout_and_transpose(k_reg_transposed, k_reg);
@@ -199,8 +194,7 @@ __global__ void attend_ker(const attn_globals<D> g) {
 
         // Cluster 5:
         //      Load K4 into shared
-        load<1, false, st_bf<KV_BLOCK_SIZE, ATTN_D, ducks::st_layout::row>, _gl_QKVO, coord<st_bf<KV_BLOCK_SIZE,ATTN_D, ducks::st_layout::row>>, NUM_THREADS>(
-            k_smem[0], g.Kg, {batch_idx, j + 1, head_idx_kv, 0});
+        G::load<1, false>(k_smem[0], g.Kg, {batch_idx, j + 1, head_idx_kv, 0});
         //      Load V1 into registers
         load(v_reg, v_smem[1]);
         __builtin_amdgcn_sched_barrier(0);
@@ -225,8 +219,7 @@ __global__ void attend_ker(const attn_globals<D> g) {
 
         // Cluster 7:
         //      Load V3 into shared
-        load<1, false, st_bf<KV_BLOCK_SIZE, ATTN_D, ducks::st_layout::accumulator_col>, _gl_QKVO, coord<st_bf<KV_BLOCK_SIZE,ATTN_D, ducks::st_layout::accumulator_col>>, NUM_THREADS>(
-            v_smem[1], g.Vg, {batch_idx, j, head_idx_kv, 0});
+        G::load<1, false>(v_smem[1], g.Vg, {batch_idx, j, head_idx_kv, 0});
         //      Load K3 into registers
         load(k_reg, k_smem[1]);
         swap_layout_and_transpose(k_reg_transposed, k_reg);
@@ -255,8 +248,7 @@ __global__ void attend_ker(const attn_globals<D> g) {
 
     // Cluster 1:
     //      Load K5 into shared
-    load<1, false, st_bf<KV_BLOCK_SIZE, ATTN_D, ducks::st_layout::row>, _gl_QKVO, coord<st_bf<KV_BLOCK_SIZE,ATTN_D, ducks::st_layout::row>>, NUM_THREADS>(
-        k_smem[1], g.Kg, {batch_idx, num_tiles - 1, head_idx_kv, 0});
+    G::load<1, false>(k_smem[1], g.Kg, {batch_idx, num_tiles - 1, head_idx_kv, 0});
     //      Load V2 into registers
     load(v_reg, v_smem[0]);
     __builtin_amdgcn_sched_barrier(0);
@@ -281,8 +273,7 @@ __global__ void attend_ker(const attn_globals<D> g) {
 
     // Cluster 3:
     //      Load V4 into shared
-    load<1, false, st_bf<KV_BLOCK_SIZE, ATTN_D, ducks::st_layout::accumulator_col>, _gl_QKVO, coord<st_bf<KV_BLOCK_SIZE,ATTN_D, ducks::st_layout::accumulator_col>>, NUM_THREADS>(
-        v_smem[0], g.Vg, {batch_idx, num_tiles - 2, head_idx_kv, 0});
+    G::load<1, false>(v_smem[0], g.Vg, {batch_idx, num_tiles - 2, head_idx_kv, 0});
     //      Load K4 into registers
     load(k_reg, k_smem[0]);
     swap_layout_and_transpose(k_reg_transposed, k_reg);
@@ -329,8 +320,7 @@ __global__ void attend_ker(const attn_globals<D> g) {
 
     // Cluster 7:
     //      Load V5 into shared
-    load<1, false, st_bf<KV_BLOCK_SIZE, ATTN_D, ducks::st_layout::accumulator_col>, _gl_QKVO, coord<st_bf<KV_BLOCK_SIZE,ATTN_D, ducks::st_layout::accumulator_col>>, NUM_THREADS>(
-        v_smem[1], g.Vg, {batch_idx, num_tiles - 1, head_idx_kv, 0});
+    G::load<1, false>(v_smem[1], g.Vg, {batch_idx, num_tiles - 1, head_idx_kv, 0});
     //      Load K5 into registers
     load(k_reg, k_smem[1]);
     __builtin_amdgcn_sched_barrier(0);
@@ -403,7 +393,7 @@ __global__ void attend_ker(const attn_globals<D> g) {
     div_col(o_reg, o_reg, norm_vec);
     qo_tile<D, float, accum_row_l> o_reg_transposed;
     swap_layout_and_transpose(o_reg_transposed, o_reg);
-    store<1, qo_tile<D, float, accum_row_l>, _gl_QKVO, coord<qo_tile<D, float, accum_row_l>>>(g.Og, o_reg_transposed, {batch_idx, tile_idx, head_idx, 0});
+    store<1>(g.Og, o_reg_transposed, {batch_idx, tile_idx, head_idx, 0});
 }
 
 template<int D>
