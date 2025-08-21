@@ -73,6 +73,14 @@ template<int H, int W, int NW> std::string generate_test_name(std::string test_i
     return label;
 }
 template <typename T> concept integral_wrapper = std::is_integral_v<decltype(T::value)>;
+template<int H, int W, int NW, integral_wrapper _K> std::string generate_test_name(std::string test_id) {
+    constexpr int K = _K::value;
+    std::string label = test_id+"_["+std::to_string(H)+"x"+std::to_string(W)+"]x"+std::to_string(K);
+    if constexpr (NW > 1) {
+        label += "_["+std::to_string(NW)+"warps]";
+    }
+    return label;
+}
 template<int H, int W, int NW, integral_wrapper _K, kittens::ducks::st_layout::all L> std::string generate_test_name(std::string test_id) {
     constexpr int K = _K::value;
     std::string label = test_id+"_["+std::to_string(H)+"x"+std::to_string(W)+"]x"+std::to_string(K);
@@ -87,6 +95,16 @@ template<int H, int W, int NW, integral_wrapper _K, kittens::ducks::st_layout::a
     else label += "_[st_col_layout]";
     return label;
 }
+template<int H, int W, int NW, kittens::ducks::rt_layout::all L> std::string generate_test_name(std::string test_id) {
+    std::string label = generate_test_name<H,W,NW>(test_id);
+    if constexpr (std::is_same_v<L, kittens::ducks::rt_layout::row>) label += "_[rt_row_layout]";
+    #ifdef KITTENS_CDNA4
+    else if constexpr (std::is_same_v<L, kittens::ducks::rt_layout::accumulator_col>) label += "_[rt_accumulator_col_layout]";
+    else if constexpr (std::is_same_v<L, kittens::ducks::rt_layout::accumulator_row>) label += "_[rt_accumulator_row_layout]";
+    #endif
+    else label += "_[rt_col_layout]";
+    return label;
+}
 template<int H, int W, int NW, kittens::ducks::st_layout::all SL, kittens::ducks::rt_layout::all RL> std::string generate_test_name(std::string test_id) {
     std::string label = generate_test_name<H,W,NW>(test_id);
     if constexpr (std::is_same_v<SL, kittens::ducks::st_layout::row>) label += "_[st_row_layout]";
@@ -99,16 +117,6 @@ template<int H, int W, int NW, kittens::ducks::st_layout::all SL, kittens::ducks
     #ifdef KITTENS_CDNA4
     else if constexpr (std::is_same_v<RL, kittens::ducks::rt_layout::accumulator_col>) label += "_[rt_accumulator_col_layout]";
     else if constexpr (std::is_same_v<RL, kittens::ducks::rt_layout::accumulator_row>) label += "_[rt_accumulator_row_layout]";
-    #endif
-    else label += "_[rt_col_layout]";
-    return label;
-}
-template<int H, int W, int NW, kittens::ducks::rt_layout::all L> std::string generate_test_name(std::string test_id) {
-    std::string label = generate_test_name<H,W,NW>(test_id);
-    if constexpr (std::is_same_v<L, kittens::ducks::rt_layout::row>) label += "_[rt_row_layout]";
-    #ifdef KITTENS_CDNA4
-    else if constexpr (std::is_same_v<L, kittens::ducks::rt_layout::accumulator_col>) label += "_[rt_accumulator_col_layout]";
-    else if constexpr (std::is_same_v<L, kittens::ducks::rt_layout::accumulator_row>) label += "_[rt_accumulator_row_layout]";
     #endif
     else label += "_[rt_col_layout]";
     return label;
@@ -236,9 +244,9 @@ struct wrapper_2d {
             hipFuncSetAttribute(
                 reinterpret_cast<const void*>(global_wrapper_2d<test, dtype, H, W, NUM_WORKERS, GL, args...>),
                 hipFuncAttributeMaxDynamicSharedMemorySize,
-                kittens::MAX_SHARED_MEMORY
+                kittens::MAX_SHARED_MEMORY / 2
             );
-            global_wrapper_2d<test, dtype, H, W, NUM_WORKERS, GL, args...><<<1, NUM_WORKERS*kittens::WARP_THREADS, kittens::MAX_SHARED_MEMORY>>>(input, output);
+            global_wrapper_2d<test, dtype, H, W, NUM_WORKERS, GL, args...><<<1, NUM_WORKERS*kittens::WARP_THREADS, kittens::MAX_SHARED_MEMORY / 2>>>(input, output);
             // fill in correct results on cpu
             test::template host_func<H, W, NUM_WORKERS, GL, args...>(i_ref, o_ref);
             // check and cleanup
