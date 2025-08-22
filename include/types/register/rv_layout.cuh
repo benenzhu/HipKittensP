@@ -25,7 +25,7 @@ struct align { constexpr static int inner_dim = 8; };
 struct align { constexpr static int inner_dim = 2; };
 #endif
 /**
- * @brief A dummy type used to identify an orthogonal (4x replicated) layout.
+ * @brief A dummy type used to identify an orthogonal (2x replicated) layout.
  */
 struct ortho { constexpr static int inner_dim = 1; };
 /**

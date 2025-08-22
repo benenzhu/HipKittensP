@@ -50,8 +50,6 @@ __device__ inline void swap_layout(rt_base<T, typename ducks::rt_layout::col> &d
     }
     else {
         // Keep original for other types
-        typedef unsigned int  uint32_t;
-        typedef uint32_t      uint2_t __attribute__((ext_vector_type(2)));
  
          T src_tmp[16] = {
              src.data[0].x, src.data[0].y,

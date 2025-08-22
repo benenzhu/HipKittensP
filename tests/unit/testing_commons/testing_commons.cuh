@@ -105,22 +105,6 @@ template<int H, int W, int NW, kittens::ducks::rt_layout::all L> std::string gen
     else label += "_[rt_col_layout]";
     return label;
 }
-template<int H, int W, int NW, kittens::ducks::st_layout::all SL, kittens::ducks::rt_layout::all RL> std::string generate_test_name(std::string test_id) {
-    std::string label = generate_test_name<H,W,NW>(test_id);
-    if constexpr (std::is_same_v<SL, kittens::ducks::st_layout::row>) label += "_[st_row_layout]";
-    #ifdef KITTENS_CDNA4
-    else if constexpr (std::is_same_v<SL, kittens::ducks::st_layout::accumulator_col>) label += "_[st_accumulator_col_layout]";
-    else if constexpr (std::is_same_v<SL, kittens::ducks::st_layout::accumulator_row>) label += "_[st_accumulator_row_layout]";
-    #endif
-    else label += "_[st_col_layout]";
-    if constexpr (std::is_same_v<RL, kittens::ducks::rt_layout::row>) label += "_[rt_row_layout]";
-    #ifdef KITTENS_CDNA4
-    else if constexpr (std::is_same_v<RL, kittens::ducks::rt_layout::accumulator_col>) label += "_[rt_accumulator_col_layout]";
-    else if constexpr (std::is_same_v<RL, kittens::ducks::rt_layout::accumulator_row>) label += "_[rt_accumulator_row_layout]";
-    #endif
-    else label += "_[rt_col_layout]";
-    return label;
-}
 template<int H, int W, int NW, integral_wrapper _J, integral_wrapper _K> std::string generate_test_name(std::string test_id) {
     constexpr int J = _J::value, K = _K::value;
     std::string label = test_id+"_["+std::to_string(H)+"x"+std::to_string(W)+"_"+std::to_string(J)+"x"+std::to_string(K)+"]";
@@ -185,9 +169,9 @@ struct wrapper_1d {
             hipFuncSetAttribute(
                 reinterpret_cast<void *>(global_wrapper_1d<test, dtype, S, NUM_WORKERS, GL, args...>),
                 hipFuncAttributeMaxDynamicSharedMemorySize,
-                kittens::MAX_SHARED_MEMORY
+                kittens::MAX_SHARED_MEMORY / 2
             );
-            global_wrapper_1d<test, dtype, S, NUM_WORKERS, GL, args...><<<1, NUM_WORKERS*kittens::WARP_THREADS, kittens::MAX_SHARED_MEMORY>>>(input, output);
+            global_wrapper_1d<test, dtype, S, NUM_WORKERS, GL, args...><<<1, NUM_WORKERS*kittens::WARP_THREADS, kittens::MAX_SHARED_MEMORY / 2>>>(input, output);
             // fill in correct results on cpu
             test::template host_func<S, NUM_WORKERS, GL, args...>(i_ref, o_ref);
             // check and cleanup

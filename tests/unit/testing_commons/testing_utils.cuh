@@ -186,12 +186,15 @@ test_result validate(T *d_i, T *d_o, const std::vector<float> &i_ref, std::vecto
     if(should_write_outputs && !good) {
         std::ofstream reffile("outputs/"+test_name+"_ref.txt");
         std::ofstream outfile("outputs/"+test_name+"_out.txt");
+        std::ofstream difffile("outputs/"+test_name+"_diff.txt");
         for(int i = 0; i < output_size; i++) {
             reffile << o_ref[i] << ' ';
             outfile << o[i] << ' ';
+            difffile << abs(o_ref[i] - o[i]) << ' ';
             if(i%cols == cols-1) {
                 reffile << '\n';
                 outfile << '\n';
+                difffile << '\n';
             }
         }
         reffile << "\n\n\nINPUTS:\n\n";
@@ -203,6 +206,7 @@ test_result validate(T *d_i, T *d_o, const std::vector<float> &i_ref, std::vecto
         }
         reffile.close();
         outfile.close();
+        difffile.close();
     }
     hipFree(d_i);
     hipFree(d_o);

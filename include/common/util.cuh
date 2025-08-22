@@ -81,6 +81,9 @@ constexpr int MAX_SHARED_MEMORY = 65536;
 constexpr int MAX_SHARED_MEMORY = 160000;
 #endif
 
+/* ----------  CUSTOM TYPES  ---------- */
+typedef uint32_t      uint2_t __attribute__((ext_vector_type(2)));
+
 /* ----------  TYPE HELPERS  ---------- */
 
 /**
