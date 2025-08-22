@@ -29,9 +29,8 @@ def generate_tensor(shape, mean, std, dtype, device):
 # pytorch
 x = generate_tensor((b, h, n, d), mean, std, torch.bfloat16, 'cuda')
 vec = generate_tensor((b, h, n, 1), mean, std, torch.bfloat16, 'cuda')
-y = x.sum(dim=-1, keepdim=True) 
-# y = x * vec
-y = vec
+y = x * vec
+y = y.sum(dim=-1, keepdim=True) 
 
 # tk
 y_tk = torch.zeros_like(y)
@@ -41,8 +40,5 @@ tk_kernel.dispatch_micro(x, vec, y_tk)
 diff = (y - y_tk).abs().max()
 print(f"diff: {diff}")
 
-# print(y[0, 0, 3:6, :16])
-# print(y_tk[0, 0, 3:6, :16])
-
-print(y[0, 0, :].T)
-print(y_tk[0, 0, :].T)
+print(y[0, 0, 3:6, :16])
+print(y_tk[0, 0, 3:6, :16])

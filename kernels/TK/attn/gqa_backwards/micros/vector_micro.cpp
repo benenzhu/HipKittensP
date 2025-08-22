@@ -19,7 +19,7 @@ struct micro_globals {
     gl<bf16, -1, -1, -1, -1> out;
     dim3 grid()  { return dim3(1); } 
     dim3 block() { return dim3(NUM_THREADS); } 
-    size_t dynamic_shared_memory() { return MAX_SHARED_MEMORY; }
+    size_t dynamic_shared_memory() { return MAX_SHARED_MEMORY-2048; }
 };
 
 __global__ __launch_bounds__(NUM_THREADS, 1)
@@ -32,11 +32,10 @@ void micro_tk(const micro_globals g) {
     load(vec, g.in_vec, {0, 0, 0, 0});
     __syncthreads();
     mul_row(tile, tile, vec);
-    // row_sum(vec, tile);
+    row_sum(vec, tile);
     __syncthreads();
     store(g.out, vec, {0, 0, 0, 0});
     __syncthreads();
-
     __builtin_amdgcn_s_waitcnt(0);
     __builtin_amdgcn_s_barrier();
     __builtin_amdgcn_sched_barrier(0);
