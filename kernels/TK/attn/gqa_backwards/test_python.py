@@ -79,7 +79,7 @@ def simple_flash_backward(Q, K, V, dO, m, l):
     dQ = torch.matmul(dS, K) * scale
     dK = torch.matmul(dS.transpose(-2, -1), Q) * scale
 
-    return dQ, dK, dV
+    return dQ, dK, dV, Delta
 
 # **************************************************
 # Generate inputs
@@ -89,9 +89,11 @@ def simple_flash_backward(Q, K, V, dO, m, l):
 causal = False
 b = 16
 h = 16
-n = 1024
+n = 32
 d = 128
 dtype = torch.bfloat16
+mean = 10
+std = 0.1  
 
 flops_ref = flops(b, n, h, d, causal, mode="bwd")
 
@@ -102,14 +104,11 @@ def generate_tensor(shape, mean, std, dtype, device):
     return scaled_tensor.contiguous()
 
 def generate_inputs():
-    mean = 5 #1e-1
-    std = 0.1  # REDUCED from 10 to 0.1 for numerical stability
-    
     # Generate in BHND format (batch, heads, seq, dim) for reference
     Q = generate_tensor((b, h, n, d), mean, std, torch.bfloat16, 'cuda')
     K = generate_tensor((b, h, n, d), mean, std, torch.bfloat16, 'cuda')
     V = generate_tensor((b, h, n, d), mean, std, torch.bfloat16, 'cuda')
-    dO = generate_tensor((b, h, n, d), mean, std, torch.bfloat16, 'cuda') * 50
+    dO = generate_tensor((b, h, n, d), mean, std, torch.bfloat16, 'cuda') 
 
     Q.requires_grad_(True)
     K.requires_grad_(True)
@@ -217,7 +216,7 @@ O_tiled = torch.matmul(P_tiled, V_tiled.float())
 m_tiled = m_tiled.squeeze(-1)
 l_tiled = l_tiled.squeeze(-1)
 
-dQ_tiled, dK_tiled, dV_tiled = simple_flash_backward(Q_tiled.float(), K_tiled.float(), V_tiled.float(), dO_tiled.float(), m_tiled, l_tiled)
+dQ_tiled, dK_tiled, dV_tiled, delta_tiled = simple_flash_backward(Q_tiled.float(), K_tiled.float(), V_tiled.float(), dO_tiled.float(), m_tiled, l_tiled)
 out_tiled_bhnd = O_tiled
 q_grad_tiled_bhnd = dQ_tiled
 k_grad_tiled_bhnd = dK_tiled
@@ -229,8 +228,8 @@ v_grad_tiled_bhnd = dV_tiled
 # **************************************************
 
 # Get forwards pass outputs
-m_tk = m_tiled.bfloat16().unsqueeze(-1)
-l_tk = l_tiled.bfloat16().unsqueeze(-1)
+m_tk = m_tiled.float().unsqueeze(-1)
+l_tk = l_tiled.float().unsqueeze(-1)
 O_tk = O_tiled.bfloat16().clone()
 
 # TK
@@ -244,6 +243,22 @@ for _ in range(num_warmup):
     dQ_tk = torch.zeros_like(q_grad_tiled_bhnd).bfloat16()
     dK_tk = torch.zeros_like(k_grad_tiled_bhnd).bfloat16()
     dV_tk = torch.zeros_like(v_grad_tiled_bhnd).bfloat16()
+    delta_tk = torch.zeros_like(delta_tiled).float()
+
+    tk_kernel.dispatch_prep(
+        O_tk.float(),     # Og
+        dO_tk.float(),    # dOg
+        delta_tk, # delta
+    )
+    print(O_tk[0,0,:4,0])
+    print(O_tiled[0,0,:4,0])
+    print(dO_tk[0,0,:4,0])
+    print(dO_tiled[0,0,:4,0])
+    print(delta_tk[0,0,:4,:])
+    print(delta_tiled[0,0,:4,:])
+
+    exit()
+
     tk_kernel.dispatch_micro(
         Q_tk,     # Qg
         K_tk,     # Kg
@@ -254,17 +269,17 @@ for _ in range(num_warmup):
         m_tk,  # m_vec
         l_tk
     )
-    tk_kernel.dispatch_bwd_dkv(
-        Q_tk,     # Qg
-        K_tk,     # Kg
-        V_tk,     # Vg
-        O_tk,     # Og
-        dO_tk,    # dOg
-        dK_tk,    # dKg (output)
-        dV_tk,    # dVg (output)
-        m_tk,  # m_vec
-        l_tk
-    )
+    # tk_kernel.dispatch_bwd_dkv(
+    #     Q_tk,     # Qg
+    #     K_tk,     # Kg
+    #     V_tk,     # Vg
+    #     O_tk,     # Og
+    #     dO_tk,    # dOg
+    #     dK_tk,    # dKg (output)
+    #     dV_tk,    # dVg (output)
+    #     m_tk,  # m_vec
+    #     l_tk
+    # )
 
 for _ in range(num_iters):
     Q_tk = Q_bhnd.bfloat16().clone().contiguous().detach().requires_grad_(True)  
@@ -286,17 +301,17 @@ for _ in range(num_iters):
         m_tk,  # m_vec
         l_tk
     )
-    tk_kernel.dispatch_bwd_dkv(
-        Q_tk,     # Qg
-        K_tk,     # Kg
-        V_tk,     # Vg
-        O_tk,     # Og
-        dO_tk,    # dOg
-        dK_tk,    # dKg (output)
-        dV_tk,    # dVg (output)
-        m_tk,     # m_vec
-        l_tk
-    )
+    # tk_kernel.dispatch_bwd_dkv(
+    #     Q_tk,     # Qg
+    #     K_tk,     # Kg
+    #     V_tk,     # Vg
+    #     O_tk,     # Og
+    #     dO_tk,    # dOg
+    #     dK_tk,    # dKg (output)
+    #     dV_tk,    # dVg (output)
+    #     m_tk,     # m_vec
+    #     l_tk
+    # )
     end_event.record()
     torch.cuda.synchronize()
     elapsed_time = start_event.elapsed_time(end_event)
@@ -338,31 +353,58 @@ print(f"V grad max error: {v_grad_tiled_diff.max().item():.6f}")
 
 # TK vs PyTorch
 print(f"\nTK vs PyTorch comparison:")
-q_grad_tk_diff = (dQ_tk - q_grad_pytorch).abs()
-k_grad_tk_diff = (dK_tk - k_grad_pytorch).abs()
-v_grad_tk_diff = (dV_tk - v_grad_pytorch).abs()
-print(f"Q grad max error: {q_grad_tk_diff.max().item():.6f}")
-print(f"K grad max error: {k_grad_tk_diff.max().item():.6f}")
-print(f"V grad max error: {v_grad_tk_diff.max().item():.6f}")
 
-print()
-print("Gradient K outputs:")
-print("TK: ", dK_tk[0, 0, 0, :4], "Max:", dK_tk.max().item())
-print("PyTorch: ", k_grad_pytorch[0, 0, 0, :4], "Max:", k_grad_pytorch.max().item())
+num_print = 24
+print("\nGradient K outputs:")
+print("TK: ", dK_tk[0, 0, 0, :num_print], "Max:", dK_tk.max().item())
+print("PyTorch: ", k_grad_pytorch[0, 0, 0, :num_print], "Max:", k_grad_pytorch.max().item())
 if use_aiter:
-    print("AITER: ", k_grad_aiter_bnhd[0, 0, 0, :4], "Max:", k_grad_aiter_bnhd.max().item())
+    print("AITER: ", k_grad_aiter_bnhd[0, 0, 0, :num_print], "Max:", k_grad_aiter_bnhd.max().item())
 
 print()
 print("Gradient V outputs:")
-print("TK: ", dV_tk[0, 0, 0, :4], "Max:", dV_tk.max().item())
-print("PyTorch: ", v_grad_pytorch[0, 0, 0, :4], "Max:", v_grad_pytorch.max().item())
+print("TK: ", dV_tk[0, 0, 0, :num_print], "Max:", dV_tk.max().item())
+print("PyTorch: ", v_grad_pytorch[0, 0, 0, :num_print], "Max:", v_grad_pytorch.max().item())
 if use_aiter:
-    print("AITER: ", v_grad_aiter_bnhd[0, 0, 0, :4], "Max:", v_grad_aiter_bnhd.max().item())
+    print("AITER: ", v_grad_aiter_bnhd[0, 0, 0, :num_print], "Max:", v_grad_aiter_bnhd.max().item())
 
 print()
 print("Gradient Q outputs:")
-print("TK: ", dQ_tk[0, 0, 0, :4], "Max:", dQ_tk.max().item())
-print("PyTorch: ", q_grad_pytorch[0, 0, 0, :4], "Max:", q_grad_pytorch.max().item())
+print("TK: ", dQ_tk[0, 0, 0, :num_print], "Max:", dQ_tk.max().item())
+print("PyTorch: ", q_grad_pytorch[0, 0, 0, :num_print], "Max:", q_grad_pytorch.max().item())
 if use_aiter:
-    print("AITER: ", q_grad_aiter_bnhd[0, 0, 0, :4], "Max:", q_grad_aiter_bnhd.max().item())
+    print("AITER: ", q_grad_aiter_bnhd[0, 0, 0, :num_print], "Max:", q_grad_aiter_bnhd.max().item())
 
+
+# **************************************************
+# TK vs PyTorch (robust tolerances & metrics)
+# **************************************************
+print(f"\nRobustness checks (TK vs PyTorch):")
+
+def robustness_check(ref, pred):
+    ref = ref.float()
+    pred = pred.float()
+    diff = (ref - pred).abs()
+    denom = ref.abs().clamp_min(1e-6)
+    mask = (diff > (1e-3 + 3e-2 * denom))
+    error_count = mask.sum().item()
+    numel = ref.numel()
+    rel_error = error_count / numel
+    l2_error = (diff.pow(2).sum().sqrt() / ref.pow(2).sum().sqrt()).item()
+    cos = torch.nn.functional.cosine_similarity(ref.flatten(), pred.flatten(), dim=0).item()
+    return diff, error_count, numel, rel_error, l2_error, cos   
+
+# Compute diffs in float32 to avoid bf16 quantization in the comparison itself
+q_diff, q_err_cnt, q_total, q_rel_error, q_l2_error, q_cos = robustness_check(q_grad_pytorch, dQ_tk)
+k_diff, k_err_cnt, k_total, k_rel_error, k_l2_error, k_cos = robustness_check(k_grad_pytorch, dK_tk)
+v_diff, v_err_cnt, v_total, v_rel_error, v_l2_error, v_cos = robustness_check(v_grad_pytorch, dV_tk)
+
+print(f"Q grad: max_abs={q_diff.max().item():.6f}, max_rel={q_rel_error:.4f}, "
+        f"rel_l2={q_l2_error:.4f}, cos={q_cos:.6f}, "
+      f"errors={q_err_cnt}/{q_total} ({100*q_err_cnt/q_total:.4f}%)")
+print(f"K grad: max_abs={k_diff.max().item():.6f}, max_rel={k_rel_error:.4f}, "
+      f"rel_l2={k_l2_error:.4f}, cos={k_cos:.6f}, "
+      f"errors={k_err_cnt}/{k_total} ({100*k_err_cnt/k_total:.4f}%)")
+print(f"V grad: max_abs={v_diff.max().item():.6f}, max_rel={v_rel_error:.4f}, "
+      f"rel_l2={v_l2_error:.4f}, cos={v_cos:.6f}, "
+      f"errors={v_err_cnt}/{v_total} ({100*v_err_cnt/v_total:.4f}%)")
