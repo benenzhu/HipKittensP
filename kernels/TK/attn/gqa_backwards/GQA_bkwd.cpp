@@ -19,8 +19,8 @@ template<int D, typename T=float, typename L=row_l> using attn_tile = rt<T, BLOC
 
 
 template<int D> struct attn_prep_globals { 
-    gl<float, -1, -1, -1, -1> Og, dOg; 
-    gl<float, -1, -1, -1, 1> delta;
+    gl<bf16, -1, -1, -1, -1> Og, dOg; 
+    gl<bf16, -1, -1, -1, 1> delta;
     dim3 grid() { return dim3(ATTN_B, ATTN_H, ATTN_N / BLOCK_SIZE); }
     dim3 block() { return dim3(NUM_THREADS); }
     size_t dynamic_shared_memory() { return MAX_SHARED_MEMORY-32000; }
@@ -33,16 +33,14 @@ __global__ void attend_prep_ker(const attn_prep_globals<D> g) {
     const int h = blockIdx.y;
     const int i = blockIdx.z;
 
-    qkvo_tile<D, float, row_l> tmp_float;
-    qkvo_tile<D, float, row_l> dO_float, O_float;
-    load(dO_float, g.dOg, {b,h,i,0});
-    load(O_float,  g.Og,  {b,h,i,0});
+    qkvo_tile<D, bf16, row_l> dO, O;
+    load(dO, g.dOg, {b,h,i,0});
+    load(O,  g.Og,  {b,h,i,0});
     
     // Δ_i = row_sum(dO ⊙ O) 
-    mul(tmp_float, dO_float, O_float);
-    attn_tile<D,float,row_l>::col_vec delta_vec;
-    row_sum(delta_vec, tmp_float); 
-
+    mul(dO, dO, O);
+    attn_tile<D,bf16,row_l>::col_vec delta_vec;
+    row_sum(delta_vec, dO); 
     store(g.delta, delta_vec, {b,h,i,0});
 }
 
@@ -50,7 +48,7 @@ __global__ void attend_prep_ker(const attn_prep_globals<D> g) {
 
 template<int D> struct attn_globals { 
     gl<bf16, -1, -1, -1, -1> Qg, Kg, Vg, Og, dOg, dQg;
-    gl<float, -1, -1, -1, 1> m_vec, l_vec;
+    gl<float, -1, -1, -1, 1> m_vec, l_vec, delta_vec;
     dim3 grid() { return dim3(ATTN_B, ATTN_H, ATTN_N / BLOCK_SIZE); }
     dim3 block() { return dim3(NUM_THREADS); }
     size_t dynamic_shared_memory() { return MAX_SHARED_MEMORY-32000; }
@@ -70,27 +68,18 @@ __global__ void attend_bwd_dq_ker(const attn_globals<D> g) {
     qkvo_tile<D, bf16, col_l> k_reg_col;
     qkvo_tile<D, float, accum_col_l> dQ_acc; 
     qkvo_tile<D, float, row_l> tmp_float;
-    qkvo_tile<D, float, row_l> dO_float, O_float;
+    qkvo_tile<D, bf16, row_l> dO_reg_bf16, O_reg_bf16;
     zero(dQ_acc);
 
     // load Q_i, dO_i, O_i, and stats (m,l)
     load(q_reg,  g.Qg,  {b,h,i,0});
-    load(dO_float, g.dOg, {b,h,i,0});
-    load(O_float,  g.Og,  {b,h,i,0});
+    load(dO_reg_bf16, g.dOg, {b,h,i,0});
+    load(O_reg_bf16,  g.Og,  {b,h,i,0});
     typename attn_tile<D,float,col_l>::col_vec m_vec, l_vec;
     load(m_vec, g.m_vec, {b,h,i,0});
     load(l_vec, g.l_vec, {b,h,i,0});
-    
-    // Δ_i = row_sum(dO ⊙ O) 
-    mul(tmp_float, dO_float, O_float);
-    attn_tile<D,float,row_l>::col_vec delta_vec;
-    row_sum(delta_vec, tmp_float); 
-
-    // typename attn_tile<D,float,accum_col_l>::col_vec delta_attn;
-    // swap_layout(delta_attn, delta_vec);
-
-    qkvo_tile<D, bf16, row_l> dO_reg_bf16;
-    copy(dO_reg_bf16, dO_float);
+    typename attn_tile<D,float,accum_col_l>::col_vec delta_vec;
+    load(delta_vec, g.delta_vec, {b,h,i,0});
 
     int num_blocks = ATTN_N/BLOCK_SIZE;
     for (int j = 0; j < num_blocks; ++j) {
@@ -115,7 +104,7 @@ __global__ void attend_bwd_dq_ker(const attn_globals<D> g) {
         attn_tile<D,float,accum_col_l> dOVt; 
         zero(dOVt);
         mma_ABt(dOVt, dO_reg_bf16, v_reg, dOVt);
-        sub_col(dOVt, dOVt, delta_vec);
+        sub_row(dOVt, dOVt, delta_vec);
         mul(dOVt, dOVt, S);
 
         // dQ += dS K_j * scale
@@ -273,7 +262,8 @@ PYBIND11_MODULE(tk_kernel, m) {
         &attn_globals<ATTN_D>::dOg, 
         &attn_globals<ATTN_D>::dQg,
         &attn_globals<ATTN_D>::m_vec, 
-        &attn_globals<ATTN_D>::l_vec
+        &attn_globals<ATTN_D>::l_vec,
+        &attn_globals<ATTN_D>::delta_vec
     );
 
     py::bind_function<dispatch_bwd_dkv<ATTN_D>>(m, "dispatch_bwd_dkv", 

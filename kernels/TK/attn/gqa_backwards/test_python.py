@@ -72,6 +72,8 @@ def simple_flash_backward(Q, K, V, dO, m, l):
     dV = torch.matmul(P.transpose(-2, -1), dO)
 
     # softmax backward
+    O = torch.ones_like(O)
+    dO = torch.ones_like(dO)
     Delta = (dO * O).sum(dim=-1, keepdim=True)                 # (B, N, H, 1)
     dS = P * (torch.matmul(dO, V.transpose(-2, -1)) - Delta)   # (B, N, H, N)
 
@@ -228,26 +230,26 @@ v_grad_tiled_bhnd = dV_tiled
 # **************************************************
 
 # Get forwards pass outputs
+Q_tk = Q_bhnd.bfloat16().clone().contiguous().detach().requires_grad_(True)  
+K_tk = K_bhnd.bfloat16().clone().contiguous().detach().requires_grad_(True)  
+V_tk = V_bhnd.bfloat16().clone().contiguous().detach().requires_grad_(True)  
 m_tk = m_tiled.float().unsqueeze(-1)
 l_tk = l_tiled.float().unsqueeze(-1)
-O_tk = O_tiled.bfloat16().clone()
+O_tk = torch.ones_like(O_tiled.bfloat16().clone())
+dO_tk = torch.ones_like(dO_bhnd.bfloat16().clone().contiguous())
 
 # TK
 print("Running ThunderKittens ...")
 timings = []
 for _ in range(num_warmup):
-    Q_tk = Q_bhnd.bfloat16().clone().contiguous().detach().requires_grad_(True)  
-    K_tk = K_bhnd.bfloat16().clone().contiguous().detach().requires_grad_(True)  
-    V_tk = V_bhnd.bfloat16().clone().contiguous().detach().requires_grad_(True)  
-    dO_tk = dO_bhnd.bfloat16().clone().contiguous() 
     dQ_tk = torch.zeros_like(q_grad_tiled_bhnd).bfloat16()
     dK_tk = torch.zeros_like(k_grad_tiled_bhnd).bfloat16()
     dV_tk = torch.zeros_like(v_grad_tiled_bhnd).bfloat16()
-    delta_tk = torch.zeros_like(delta_tiled).float()
+    delta_tk = torch.zeros_like(delta_tiled).bfloat16()
 
     tk_kernel.dispatch_prep(
-        O_tk.float(),     # Og
-        dO_tk.float(),    # dOg
+        O_tk,     # Og
+        dO_tk,    # dOg
         delta_tk, # delta
     )
     print(O_tk[0,0,:4,0])
@@ -282,10 +284,6 @@ for _ in range(num_warmup):
     # )
 
 for _ in range(num_iters):
-    Q_tk = Q_bhnd.bfloat16().clone().contiguous().detach().requires_grad_(True)  
-    K_tk = K_bhnd.bfloat16().clone().contiguous().detach().requires_grad_(True)  
-    V_tk = V_bhnd.bfloat16().clone().contiguous().detach().requires_grad_(True)  
-    dO_tk = dO_bhnd.bfloat16().clone().contiguous() 
     dQ_tk = torch.zeros_like(q_grad_tiled_bhnd).bfloat16()
     dK_tk = torch.zeros_like(k_grad_tiled_bhnd).bfloat16()
     dV_tk = torch.zeros_like(v_grad_tiled_bhnd).bfloat16()
