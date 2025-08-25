@@ -116,9 +116,13 @@ concept col_layout = all<T> && std::is_same_v<typename T::layout, ducks::rt_layo
 
 #ifdef KITTENS_CDNA4
 template<typename T>
-concept accumulator_col_layout = all<T> && std::is_same_v<typename T::layout, ducks::rt_layout::accumulator_col>;
+concept row_like = all<T> && (std::is_same_v<typename T::layout, ducks::rt_layout::row> || std::is_same_v<typename T::layout, ducks::rt_layout::accumulator_row>);
+template<typename T>
+concept col_like = all<T> && (std::is_same_v<typename T::layout, ducks::rt_layout::col> || std::is_same_v<typename T::layout, ducks::rt_layout::accumulator_col>);
 template<typename T>
 concept accumulator_row_layout = all<T> && std::is_same_v<typename T::layout, ducks::rt_layout::accumulator_row>;
+template<typename T>
+concept accumulator_col_layout = all<T> && std::is_same_v<typename T::layout, ducks::rt_layout::accumulator_col>;
 #endif
 
 
