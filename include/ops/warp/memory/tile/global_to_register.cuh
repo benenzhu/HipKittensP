@@ -215,7 +215,7 @@ __device__ inline static void load(RT &dst, const GL &src, const COORD &idx) {
     const int row_stride = src.template stride<axis>();
     int laneid = kittens::laneid();
 
-    int row_offset = laneid%(dst.tile_size_row), col_offset = (dst.elements_per_base_tile)*(laneid/dst.tile_size_row);
+    int row_offset = laneid%(dst.tile_size_row), col_offset = 4*(laneid/dst.tile_size_row);
 
     uint32_t buffer_size = src.batch() * src.depth() * src.rows() * src.cols() * sizeof(U);
     std::uintptr_t as_int = reinterpret_cast<std::uintptr_t>(src_ptr);
@@ -229,12 +229,40 @@ __device__ inline static void load(RT &dst, const GL &src, const COORD &idx) {
         #pragma unroll
         for(int j = 0; j < dst.width; j++) {
 
-            #pragma unroll
-            for (int k = 0; k < dst.packed_per_thread; k++) {
-                int col = dst.tile_size_col*j + col_offset + k*8;
+            if constexpr (std::is_same_v<typename RT::matrix_layout, mfma_32x32x16>) {
+                #pragma unroll
+                for (int k = 0; k < 4; k++) {
+                    int col = dst.tile_size_col*j + col_offset + k*8;
 
+                    U2* tmp;
+                    if constexpr (sizeof(U2) == 4) { // bf16_2
+                        float2 loaded = std::bit_cast<float2>(llvm_amdgcn_raw_buffer_load_b64(
+                            std::bit_cast<i32x4>(br),
+                            (row*row_stride + col) * sizeof(U),
+                            0,
+                            0
+                        ));
+                        tmp = reinterpret_cast<U2*>(&loaded);
+                    }
+                    else { // float2
+                        float4 loaded;
+                        loaded = std::bit_cast<float4>(llvm_amdgcn_raw_buffer_load_b128(
+                            std::bit_cast<i32x4>(br),
+                            (row*row_stride + col) * sizeof(U),
+                            0,
+                            0
+                        ));
+                        tmp = reinterpret_cast<U2*>(&loaded);
+                    }
+                    #pragma unroll
+                    for(int l = 0; l < 2; l++) {
+                        dst.tiles[i][j].data[k*2 + l] = base_types::convertor<T2, U2>::convert(tmp[l]);
+                    }
+                }
+            } else {
+                int col = dst.tile_size_col*j + col_offset;
                 U2* tmp;
-                if constexpr (std::is_same_v<U2, bf16_2>) { 
+                if constexpr (sizeof(U2) == 4) { // bf16_2
                     float2 loaded = std::bit_cast<float2>(llvm_amdgcn_raw_buffer_load_b64(
                         std::bit_cast<i32x4>(br),
                         (row*row_stride + col) * sizeof(U),
@@ -255,10 +283,9 @@ __device__ inline static void load(RT &dst, const GL &src, const COORD &idx) {
                 }
                 #pragma unroll
                 for(int l = 0; l < 2; l++) {
-                    dst.tiles[i][j].data[k*2 + l] = base_types::convertor<T2, U2>::convert(tmp[l]);
+                    dst.tiles[i][j].data[l] = base_types::convertor<T2, U2>::convert(tmp[l]);
                 }
             }
-
         }
     }
 }
@@ -468,7 +495,7 @@ __device__ inline static void store(const GL &dst, const RT &src, const COORD &i
     i32x4 srsrc = make_srsrc(dst_ptr, row_stride * RT::rows * sizeof(U));
 
     int laneid = kittens::laneid();
-    int col_offset = (laneid/src.tile_size_row) * src.elements_per_base_tile;
+    int col_offset = (laneid/src.tile_size_row) * 4;
     int row_offset = laneid%src.tile_size_row;
 
     #pragma unroll
@@ -478,18 +505,33 @@ __device__ inline static void store(const GL &dst, const RT &src, const COORD &i
         for(int j = 0; j < src.width; j++) {
             int col = src.tile_size_col * j + col_offset;
 
-            #pragma unroll
-            for (int jj = 0; jj < src.packed_per_thread; jj++) {
+            if constexpr (std::is_same_v<typename RT::matrix_layout, mfma_32x32x16>) {
+                #pragma unroll
+                for (int jj = 0; jj < 4; jj++) {
+                    U2 data[2];
+
+                    data[0] = base_types::convertor<U2, T2>::convert(src.tiles[i][j].data[jj * 2]);
+                    data[1] = base_types::convertor<U2, T2>::convert(src.tiles[i][j].data[jj * 2 + 1]);
+
+                    if constexpr (std::is_same_v<U2, bf16_2>) { // bf16_2
+                        kittens::llvm_amdgcn_raw_buffer_store_b64(*(uint64_t*)&data, srsrc, (row*row_stride + col + (jj * 8)) * sizeof(U), 0, static_cast<int>(kittens::coherency::cache_all));
+                    }
+                    else { // float2
+                        kittens::llvm_amdgcn_raw_buffer_store_b128(*(__uint128_t*)&data, srsrc, (row*row_stride + col + (jj * 8)) * sizeof(U), 0, static_cast<int>(kittens::coherency::cache_all));
+                    }
+                }
+            } 
+            else {
                 U2 data[2];
 
-                data[0] = base_types::convertor<U2, T2>::convert(src.tiles[i][j].data[jj * 2]);
-                data[1] = base_types::convertor<U2, T2>::convert(src.tiles[i][j].data[jj * 2 + 1]);
+                data[0] = base_types::convertor<U2, T2>::convert(src.tiles[i][j].data[0]);
+                data[1] = base_types::convertor<U2, T2>::convert(src.tiles[i][j].data[1]);
 
-                if constexpr (sizeof(U2) == 4) { // bf16_2
-                    kittens::llvm_amdgcn_raw_buffer_store_b64(*(uint64_t*)&data, srsrc, (row*row_stride + col + (jj * 8)) * sizeof(U), 0, static_cast<int>(kittens::coherency::cache_all));
+                if constexpr (std::is_same_v<U2, bf16_2>) { // bf16_2
+                    kittens::llvm_amdgcn_raw_buffer_store_b64(*(uint64_t*)&data, srsrc, (row*row_stride + col) * sizeof(U), 0, static_cast<int>(kittens::coherency::cache_all));
                 }
                 else { // float2
-                    kittens::llvm_amdgcn_raw_buffer_store_b128(*(__uint128_t*)&data, srsrc, (row*row_stride + col + (jj * 8)) * sizeof(U), 0, static_cast<int>(kittens::coherency::cache_all));
+                    kittens::llvm_amdgcn_raw_buffer_store_b128(*(__uint128_t*)&data, srsrc, (row*row_stride + col) * sizeof(U), 0, static_cast<int>(kittens::coherency::cache_all));
                 }
             }
         }
