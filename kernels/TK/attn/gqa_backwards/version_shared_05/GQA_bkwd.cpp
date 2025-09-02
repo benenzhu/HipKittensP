@@ -23,7 +23,6 @@ template<int D, typename T=bf16, typename L=row_l, typename M=mfma_16x16x32> usi
 template<int D, typename T=bf16, typename L=row_l, typename M=mfma_16x16x32> using kv_tile_T = rt<T, D, WARP_SIZE_KV, L, M>;
 template<int D, typename T=float, typename L=accum_col_l, typename M=mfma_16x16x32> using attn_tile = rt<T, WARP_SIZE_QO, WARP_SIZE_KV, L, M>;
 
-
 template<int D> struct attn_prep_globals { 
     gl<bf16, -1, -1, -1, -1> Og;
     gl<bf16, -1, -1, -1, -1> dOg; 
@@ -242,6 +241,7 @@ __global__ void attend_bwd_combined_ker(const attn_bwd_combined_globals<D> g) {
 
     // 6. Load K_j and V_j from HBM to registers
     const int j = seq_idx * NUM_WARPS + warpid;
+    load(V_j, g.V, {batch_idx, head_idx, j, 0});
     // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
     // __builtin_amdgcn_s_waitcnt(0);
     // __builtin_amdgcn_s_barrier();
@@ -267,7 +267,7 @@ __global__ void attend_bwd_combined_ker(const attn_bwd_combined_globals<D> g) {
         copy(P_ij_bf16, P_ij);
 
         // 13. dP_ij = dO_i @ V_j^T
-        load(V_j, g.V, {batch_idx, head_idx, j, 0});
+
         load(*(qo_tile<D, bf16, row_l, mfma_16x16x32>*) (&dO_i), g.dOg, {batch_idx, head_idx, i, 0}); // TODO: replace with SMEM load;
         load(delta_i, g.delta_vec, {batch_idx, head_idx, 0, i});
         zero(dP_ij);
@@ -283,7 +283,6 @@ __global__ void attend_bwd_combined_ker(const attn_bwd_combined_globals<D> g) {
         load(dO_i, g.dOg, {batch_idx, head_idx, i, 0});
         P_ij_bf16_col = swap_layout_inplace<col_l, mfma_32x32x16>(P_ij_bf16);
         mma_AtB(dV_j_T, dO_i, P_ij_bf16_col, dV_j_T);
-
         // 16. dK_j += dS_ij^T @ Q_i   (128x64)=(128x16)x(16x64)
         load(*(qo_tile<D, bf16, col_l, mfma_32x32x16>*) (&Q_i), g.Q, {batch_idx, head_idx, i, 0});
         dP_ij_bf16_col = swap_layout_inplace<col_l, mfma_32x32x16>(dP_ij_bf16);
