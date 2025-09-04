@@ -666,7 +666,7 @@ __global__ __launch_bounds__(256, 1) void matmul_device(const kittens::gl<fp8e4m
 
     RT_A a[2];
     RT_B b[2];
-    RT_C c[4];
+    RT_C c[2][2];
 
     int global_block_id = blockIdx.x;
 
@@ -702,10 +702,10 @@ __global__ __launch_bounds__(256, 1) void matmul_device(const kittens::gl<fp8e4m
     int warp_m = (warpid() / WARPS_COL);
     int warp_n = (warpid() % WARPS_COL);
 
-    zero(c[0]);
-    zero(c[1]);
-    zero(c[2]);
-    zero(c[3]);
+    zero(c[0][0]);
+    zero(c[0][1]);
+    zero(c[1][0]);
+    zero(c[1][1]);
 
     #pragma unroll
     for (int k = 0; k < k_iters; ++k) {
@@ -735,209 +735,209 @@ __global__ __launch_bounds__(256, 1) void matmul_device(const kittens::gl<fp8e4m
         // mma_ABt(c, a, b, c);
         {
             mma_ABt_base(
-                c[0].tiles[0][0],
+                c[0][0].tiles[0][0],
                 a[0].tiles[0][0],
                 b[0].tiles[0][0],
-                c[0].tiles[0][0]
+                c[0][0].tiles[0][0]
             );
             mma_ABt_base(
-                c[0].tiles[0][0],
+                c[0][0].tiles[0][0],
                 a[0].tiles[0][1],
                 b[0].tiles[0][1],
-                c[0].tiles[0][0]
+                c[0][0].tiles[0][0]
             );
             mma_ABt_base(
-                c[0].tiles[0][1],
+                c[0][0].tiles[0][1],
                 a[0].tiles[0][0],
                 b[0].tiles[1][0],
-                c[0].tiles[0][1]
+                c[0][0].tiles[0][1]
             );
             mma_ABt_base(
-                c[0].tiles[0][1],
+                c[0][0].tiles[0][1],
                 a[0].tiles[0][1],
                 b[0].tiles[1][1],
-                c[0].tiles[0][1]
+                c[0][0].tiles[0][1]
             );
             mma_ABt_base(
-                c[1].tiles[0][0],
+                c[0][1].tiles[0][0],
                 a[0].tiles[0][0],
                 b[1].tiles[0][0],
-                c[1].tiles[0][0]
+                c[0][1].tiles[0][0]
             );
             mma_ABt_base(
-                c[1].tiles[0][0],
+                c[0][1].tiles[0][0],
                 a[0].tiles[0][1],
                 b[1].tiles[0][1],
-                c[1].tiles[0][0]
+                c[0][1].tiles[0][0]
             );
             mma_ABt_base(
-                c[1].tiles[0][1],
+                c[0][1].tiles[0][1],
                 a[0].tiles[0][0],
                 b[1].tiles[1][0],
-                c[1].tiles[0][1]
+                c[0][1].tiles[0][1]
             );
             mma_ABt_base(
-                c[1].tiles[0][1],
+                c[0][1].tiles[0][1],
                 a[0].tiles[0][1],
                 b[1].tiles[1][1],
-                c[1].tiles[0][1]
+                c[0][1].tiles[0][1]
             );
 
             mma_ABt_base(
-                c[0].tiles[1][0],
+                c[0][0].tiles[1][0],
                 a[0].tiles[1][0],
                 b[0].tiles[0][0],
-                c[0].tiles[1][0]
+                c[0][0].tiles[1][0]
             );
             mma_ABt_base(
-                c[0].tiles[1][0],
+                c[0][0].tiles[1][0],
                 a[0].tiles[1][1],
                 b[0].tiles[0][1],
-                c[0].tiles[1][0]
+                c[0][0].tiles[1][0]
             );
             mma_ABt_base(
-                c[0].tiles[1][1],
+                c[0][0].tiles[1][1],
                 a[0].tiles[1][0],
                 b[0].tiles[1][0],
-                c[0].tiles[1][1]
+                c[0][0].tiles[1][1]
             );
             mma_ABt_base(
-                c[0].tiles[1][1],
+                c[0][0].tiles[1][1],
                 a[0].tiles[1][1],
                 b[0].tiles[1][1],
-                c[0].tiles[1][1]
+                c[0][0].tiles[1][1]
             );
             mma_ABt_base(
-                c[1].tiles[1][0],
+                c[0][1].tiles[1][0],
                 a[0].tiles[1][0],
                 b[1].tiles[0][0],
-                c[1].tiles[1][0]
+                c[0][1].tiles[1][0]
             );
             mma_ABt_base(
-                c[1].tiles[1][0],
+                c[0][1].tiles[1][0],
                 a[0].tiles[1][1],
                 b[1].tiles[0][1],
-                c[1].tiles[1][0]
+                c[0][1].tiles[1][0]
             );
             mma_ABt_base(
-                c[1].tiles[1][1],
+                c[0][1].tiles[1][1],
                 a[0].tiles[1][0],
                 b[1].tiles[1][0],
-                c[1].tiles[1][1]
+                c[0][1].tiles[1][1]
             );
             mma_ABt_base(
-                c[1].tiles[1][1],
+                c[0][1].tiles[1][1],
                 a[0].tiles[1][1],
                 b[1].tiles[1][1],
-                c[1].tiles[1][1]
+                c[0][1].tiles[1][1]
             );
 
             mma_ABt_base(
-                c[2].tiles[0][0],
+                c[1][0].tiles[0][0],
                 a[1].tiles[0][0],
                 b[0].tiles[0][0],
-                c[2].tiles[0][0]
+                c[1][0].tiles[0][0]
             );
             mma_ABt_base(
-                c[2].tiles[0][0],
+                c[1][0].tiles[0][0],
                 a[1].tiles[0][1],
                 b[0].tiles[0][1],
-                c[2].tiles[0][0]
+                c[1][0].tiles[0][0]
             );
             mma_ABt_base(
-                c[2].tiles[0][1],
+                c[1][0].tiles[0][1],
                 a[1].tiles[0][0],
                 b[0].tiles[1][0],
-                c[2].tiles[0][1]
+                c[1][0].tiles[0][1]
             );
             mma_ABt_base(
-                c[2].tiles[0][1],
+                c[1][0].tiles[0][1],
                 a[1].tiles[0][1],
                 b[0].tiles[1][1],
-                c[2].tiles[0][1]
+                c[1][0].tiles[0][1]
             );
             mma_ABt_base(
-                c[3].tiles[0][0],
+                c[1][1].tiles[0][0],
                 a[1].tiles[0][0],
                 b[1].tiles[0][0],
-                c[3].tiles[0][0]
+                c[1][1].tiles[0][0]
             );
             mma_ABt_base(
-                c[3].tiles[0][0],
+                c[1][1].tiles[0][0],
                 a[1].tiles[0][1],
                 b[1].tiles[0][1],
-                c[3].tiles[0][0]
+                c[1][1].tiles[0][0]
             );
             mma_ABt_base(
-                c[3].tiles[0][1],
+                c[1][1].tiles[0][1],
                 a[1].tiles[0][0],
                 b[1].tiles[1][0],
-                c[3].tiles[0][1]
+                c[1][1].tiles[0][1]
             );
             mma_ABt_base(
-                c[3].tiles[0][1],
+                c[1][1].tiles[0][1],
                 a[1].tiles[0][1],
                 b[1].tiles[1][1],
-                c[3].tiles[0][1]
+                c[1][1].tiles[0][1]
             );
 
             mma_ABt_base(
-                c[2].tiles[1][0],
+                c[1][0].tiles[1][0],
                 a[1].tiles[1][0],
                 b[0].tiles[0][0],
-                c[2].tiles[1][0]
+                c[1][0].tiles[1][0]
             );
             mma_ABt_base(
-                c[2].tiles[1][0],
+                c[1][0].tiles[1][0],
                 a[1].tiles[1][1],
                 b[0].tiles[0][1],
-                c[2].tiles[1][0]
+                c[1][0].tiles[1][0]
             );
             mma_ABt_base(
-                c[2].tiles[1][1],
+                c[1][0].tiles[1][1],
                 a[1].tiles[1][0],
                 b[0].tiles[1][0],
-                c[2].tiles[1][1]
+                c[1][0].tiles[1][1]
             );
             mma_ABt_base(
-                c[2].tiles[1][1],
+                c[1][0].tiles[1][1],
                 a[1].tiles[1][1],
                 b[0].tiles[1][1],
-                c[2].tiles[1][1]
+                c[1][0].tiles[1][1]
             );
             mma_ABt_base(
-                c[3].tiles[1][0],
+                c[1][1].tiles[1][0],
                 a[1].tiles[1][0],
                 b[1].tiles[0][0],
-                c[3].tiles[1][0]
+                c[1][1].tiles[1][0]
             );
             mma_ABt_base(
-                c[3].tiles[1][0],
+                c[1][1].tiles[1][0],
                 a[1].tiles[1][1],
                 b[1].tiles[0][1],
-                c[3].tiles[1][0]
+                c[1][1].tiles[1][0]
             );
             mma_ABt_base(
-                c[3].tiles[1][1],
+                c[1][1].tiles[1][1],
                 a[1].tiles[1][0],
                 b[1].tiles[1][0],
-                c[3].tiles[1][1]
+                c[1][1].tiles[1][1]
             );
             mma_ABt_base(
-                c[3].tiles[1][1],
+                c[1][1].tiles[1][1],
                 a[1].tiles[1][1],
                 b[1].tiles[1][1],
-                c[3].tiles[1][1]
+                c[1][1].tiles[1][1]
             );
         }
         __builtin_amdgcn_sched_barrier(0);
     }
 
     // Store result: each warp stores its 64x64 result
-    store(C, c[0], {0, 0, (block_row * WARPS_ROW + warp_m) * 2, (block_col * WARPS_COL + warp_n) * 2});
-    store(C, c[1], {0, 0, (block_row * WARPS_ROW + warp_m) * 2, (block_col * WARPS_COL + warp_n) * 2 + 1});
-    store(C, c[2], {0, 0, (block_row * WARPS_ROW + warp_m) * 2 + 1, (block_col * WARPS_COL + warp_n) * 2});
-    store(C, c[3], {0, 0, (block_row * WARPS_ROW + warp_m) * 2 + 1, (block_col * WARPS_COL + warp_n) * 2 + 1});
+    store(C, c[0][0], {0, 0, (block_row * WARPS_ROW + warp_m) * 2, (block_col * WARPS_COL + warp_n) * 2});
+    store(C, c[0][1], {0, 0, (block_row * WARPS_ROW + warp_m) * 2, (block_col * WARPS_COL + warp_n) * 2 + 1});
+    store(C, c[1][0], {0, 0, (block_row * WARPS_ROW + warp_m) * 2 + 1, (block_col * WARPS_COL + warp_n) * 2});
+    store(C, c[1][1], {0, 0, (block_row * WARPS_ROW + warp_m) * 2 + 1, (block_col * WARPS_COL + warp_n) * 2 + 1});
 }
 
 template <int M, int N, int K, int CUs>
