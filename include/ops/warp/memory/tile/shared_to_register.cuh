@@ -75,10 +75,9 @@ __device__ inline static void load(RT &dst, const ST &src) {
                     }
                 }
             } else if constexpr (std::is_same_v<typename RT::layout, ducks::rt_layout::col>) {
-                const int shared_tile_offset = (laneid / 32) * row_stride;
-                const int row_offset = (laneid % 16) / 4 + ((laneid % 32) / 16) * 8;
+                const int row_offset = (laneid % 16) / 4 + (laneid / 16) * 4;
                 const int col_offset = ((laneid % 4) * 4);
-                const int lane_byte_offset = (row_offset * ST::underlying_tile_cols + col_offset) * sizeof(U) + shared_tile_offset;
+                const int lane_byte_offset = (row_offset * ST::underlying_tile_cols + col_offset) * sizeof(U);
 
                 const uint32_t addr = reinterpret_cast<uintptr_t>(&src.data[0]) + lane_byte_offset;
         
@@ -93,7 +92,7 @@ __device__ inline static void load(RT &dst, const ST &src) {
                             "=v"(*reinterpret_cast<float2*>(&dst.tiles[i][j].data[2]))
                             : "v"(addr),
                             "i"(i * (2 * row_stride) + j * tile_stride),
-                            "i"(i * (2 * row_stride) + j * tile_stride + 4 * ST::underlying_tile_cols * sizeof(U))
+                            "i"(i * (2 * row_stride) + j * tile_stride + row_stride)
                             : "memory"
                         ); 
                     }
@@ -160,9 +159,9 @@ __device__ inline static void load(RT &dst, const ST &src) {
                     // The base tiles on the shared tile are 16x32.
                     // As a result, every row of register tiles map to two rows of base tiles on the shared tile.
                     // Furthermore, every column of shared tiles map to two columns of register tiles.
-                    int row_offset = (laneid % 16) / 4 + ((laneid % 32) / 16) * 8;
+                    int row_offset = (laneid % 16) / 4 + (laneid / 16) * 8;
                     int col_offset = ((laneid % 4) * 4);
-                    int row_tile_byte_offset = (laneid / 32) * ST::underlying_width * ST::underlying_tile_rows * ST::underlying_tile_cols * sizeof(U);
+                    int row_tile_byte_offset = ST::underlying_width * ST::underlying_tile_rows * ST::underlying_tile_cols * sizeof(U);
                     int lane_byte_offset = (row_offset * ST::underlying_tile_cols + col_offset) * sizeof(U);
                     int swizzled_lane_byte_offset = lane_byte_offset ^ ((lane_byte_offset >> 9) << 5);
 
@@ -217,11 +216,13 @@ __device__ inline static void load(RT &dst, const ST &src) {
     } else {
         if constexpr (std::is_same_v<typename RT::layout, ducks::rt_layout::col>) {
             if constexpr (std::is_same_v<typename RT::matrix_layout, ducks::rt_matrix::mfma_16x16x32>) {
-                const int row_offset = (laneid % 16) / 4 + (laneid / 16) * 8;
+                const int shared_tile_offset = 16 * 16 * sizeof(U);
+                const int row_offset = (laneid % 16) / 4 + (laneid / 16) * 4;
                 const int col_offset = ((laneid % 4) * 4);
                 const int lane_byte_offset = (row_offset * ST::underlying_tile_cols /*16*/ + col_offset) * sizeof(U);
+                const int swizzled_lane_byte_offset = lane_byte_offset ^ ((lane_byte_offset >> 7) << 3);
 
-                const uint32_t addr = reinterpret_cast<uintptr_t>(&src.data[0]) + lane_byte_offset;
+                const uint32_t addr = reinterpret_cast<uintptr_t>(&src.data[0]) + swizzled_lane_byte_offset;
         
                 #pragma unroll
                 for(int i = 0; i < dst.height; i++) {
@@ -234,7 +235,7 @@ __device__ inline static void load(RT &dst, const ST &src) {
                             "=v"(*reinterpret_cast<float2*>(&dst.tiles[i][j].data[2]))
                             : "v"(addr),
                             "i"(i * row_stride + j * tile_stride),
-                            "i"(i * row_stride + j * tile_stride + 4 * ST::underlying_tile_cols * sizeof(U))
+                            "i"(i * row_stride + j * tile_stride + shared_tile_offset)
                             : "memory"
                         ); 
                     }
@@ -326,7 +327,11 @@ __device__ inline static void store(ST &dst, const RT &src) {
     const int laneid = kittens::laneid();
     const int col_offset = (laneid / 16) * 4;
     const int row_offset = (laneid % 16);
-    const int lane_offset = row_offset * ST::underlying_tile_cols + col_offset;
+    // const int lane_offset = (row_offset * ST::underlying_tile_cols + col_offset);
+    const int lane_byte_offset = (row_offset * ST::underlying_tile_cols + col_offset) * sizeof(U);
+    const int swizzled_lane_byte_offset = lane_byte_offset ^ ((lane_byte_offset >> 7) << 3);
+
+    const uint32_t addr = reinterpret_cast<uintptr_t>(&dst.data[0]) + swizzled_lane_byte_offset;
 
     const int tile_stride = ST::underlying_tile_rows * ST::underlying_tile_cols;
     const int subtile_stride = RT::tile_size_row * RT::tile_size_col;
@@ -337,13 +342,28 @@ __device__ inline static void store(ST &dst, const RT &src) {
         #pragma unroll
         for(int j = 0; j < dst.width; j++) {
 
-            U* dst_ptr = &dst.data[i * row_stride + j * tile_stride + lane_offset];
-            *(U2*)(&dst_ptr[0]) = src.tiles[i * 2][j].data[0];
-            *(U2*)(&dst_ptr[2]) = src.tiles[i * 2][j].data[1];
+            // U* dst_ptr = &dst.data[i * row_stride + j * tile_stride + lane_offset];
+            // *(U2*)(&dst_ptr[0]) = src.tiles[i * 2][j].data[0];
+            // *(U2*)(&dst_ptr[2]) = src.tiles[i * 2][j].data[1];
 
-            dst_ptr = &dst.data[subtile_stride + i * row_stride + j * tile_stride + lane_offset];
-            *(U2*)(&dst_ptr[0]) = src.tiles[i * 2 + 1][j].data[0];
-            *(U2*)(&dst_ptr[2]) = src.tiles[i * 2 + 1][j].data[1];
+            // printf("threadIdx.x: %d, addr: 0x%lx, bank: %d\n", threadIdx.x, addr, (addr >> 2) & 0x3F);
+            asm volatile(
+                "ds_write_b64 %0, %1 offset:%2\n"
+                : 
+                : "v"(addr), "v"(*reinterpret_cast<const float2*>(&src.tiles[i * 2][j].data[0])),
+                "i"((i * row_stride + j * tile_stride) * sizeof(U))
+            );
+
+            // dst_ptr = &dst.data[subtile_stride + i * row_stride + j * tile_stride + lane_offset];
+            // *(U2*)(&dst_ptr[0]) = src.tiles[i * 2 + 1][j].data[0];
+            // *(U2*)(&dst_ptr[2]) = src.tiles[i * 2 + 1][j].data[1];
+
+            asm volatile(
+                "ds_write_b64 %0, %1 offset:%2\n"
+                : 
+                : "v"(addr), "v"(*reinterpret_cast<const float2*>(&src.tiles[i * 2 + 1][j].data[0])),
+                "i"((i * row_stride + j * tile_stride + subtile_stride) * sizeof(U))
+            );
         }
     }
 
