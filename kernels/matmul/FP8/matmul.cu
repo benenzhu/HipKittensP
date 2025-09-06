@@ -312,31 +312,31 @@ __device__ inline void buffer_load_lds(int i, const T* lds_base, i32x4 srsrc, in
     constexpr int memcpy_per_tile =  ST::rows * ST::cols * sizeof(fp8e4m3) / (16 * N_THREADS); // 8
     static_assert(memcpy_per_tile > 0, "memcpy_per_tile must be greater than 0. Please decrease the number of threads.");
 
-    constexpr int num_warps = N_THREADS / WARP_THREADS;
     constexpr int elem_per_thread = 16 / sizeof(fp8e4m3);
-    constexpr int elem_per_warp = elem_per_thread * kittens::WARP_THREADS; // 1024
-    constexpr int num_register_subtiles = kittens::TILE_ROW_DIM<T> * kittens::TILE_COL_DIM<T> / elem_per_warp; // 2
-    constexpr int num_register_tiles_per_row = ST::cols / kittens::TILE_COL_DIM<T>; // 2
+    constexpr int col_dim_threads = ST::cols / elem_per_thread;
+    int row_offset = i * elem_per_thread * N_THREADS / ST::cols + threadIdx.x / col_dim_threads;
+    int col_offset = threadIdx.x % col_dim_threads * elem_per_thread;
 
-    const int register_tile_id = (warpid() + i * num_warps) / num_register_subtiles; // 0 - 15
-    const int register_subtile_id = (warpid() + i * num_warps) % num_register_subtiles; // 0 - 1
-    const int register_subtile_cols = kittens::TILE_COL_DIM<T> / num_register_subtiles; // 32
-    const int num_register_subtiles_per_row = num_register_tiles_per_row * num_register_subtiles; // 4
-    const int warp_col_offset = ((register_tile_id % num_register_tiles_per_row) * num_register_subtiles + register_subtile_id) * register_subtile_cols; // 0 - 127
-    const int warp_row_offset = (register_tile_id / num_register_tiles_per_row) * kittens::TILE_ROW_DIM<T>; // 0 - 255
+    uintptr_t offset_in_st = (row_offset * ST::underlying_cols + col_offset) * sizeof(T);
+    offset_in_st ^= (((offset_in_st % (256*8)) >> 8) << 4);
 
-    int col_offset = warp_col_offset + (kittens::laneid() / kittens::TILE_ROW_DIM<T>) * elem_per_thread;
-    int row_offset = warp_row_offset + (kittens::laneid() % kittens::TILE_ROW_DIM<T>);
-    as3_uint32_ptr lds_ptr = (as3_uint32_ptr)(reinterpret_cast<uintptr_t>((lds_base + (i * N_THREADS * elem_per_thread))));
+    row_offset = offset_in_st / (ST::underlying_cols * sizeof(T));
+    col_offset = offset_in_st % (ST::underlying_cols * sizeof(T)) / sizeof(T);
+
+    uintptr_t offset_in_global = (row_offset * row_stride + col_offset) * sizeof(T);
+
+    const T* lds_elem_ptr = lds_base + (i * N_THREADS * elem_per_thread);
+    uintptr_t lds_addr = reinterpret_cast<uintptr_t>(lds_elem_ptr);
+    as3_uint32_ptr lds_ptr = (as3_uint32_ptr)(lds_addr);
 
     llvm_amdgcn_raw_buffer_load_lds(
-    srsrc, // buffer resource
-    lds_ptr,
-    16, // 16 bytes
-    (row_offset * row_stride + col_offset) * sizeof(T),
-    0, 
-    0, // instruction offset
-    static_cast<index_t>(coherency::cache_all)); // cache coherency
+        srsrc, // buffer resource
+        lds_ptr,
+        16, // 16 bytes
+        offset_in_global,
+        0, 
+        0, // instruction offset
+        static_cast<index_t>(coherency::cache_all)); // cache coherency
 }
 
 template<typename RT, typename ST, typename U>
@@ -497,145 +497,6 @@ __device__ inline static void load_st_to_rt(RT &dst, const ST &src) {
     }
 }
 
-// {
-        //     /***** START GLOBAL TO SHARED VARS *****/
-
-        //     // load<2, false,
-        //     //      kittens::ducks::rt_layout::row, ST_A, kittens::gl<fp8e4m3, 1, 1, M, K>,
-        //     //      coord<ST_A>,
-        //     //      NUM_WARPS*WARP_THREADS>
-        //     //        (As[curr], A, {0, 0, block_row, k + 2});
-        //     // __device__ inline void load(ST& dst, const GL& src, const COORD& idx)
-        //     using T = fp8e4m3;
-        //     using ST = ST_A;
-        //     using GL = GL_A;
-        //     const ST& dst_gl_to_st = As[curr];
-        //     const GL& src_gl_to_st = A;
-        //     const coord<ST>& idx = {0, 0, block_row, k + 2};
-        //     constexpr int N_THREADS = NUM_WARPS*WARP_THREADS;
-
-        //     const int row_stride = src_gl_to_st.template stride<2>();
-        //     coord<> unit_coord = idx.template unit_coord<2, 3>();
-        //     T* global_ptr = (T*)&src_gl_to_st[unit_coord];
-        //     i32x4 srsrc = make_srsrc(global_ptr, row_stride * ST::rows * sizeof(T));
-        //     constexpr int elem_per_warp = (16 / sizeof(fp8e4m3)) * kittens::WARP_THREADS; // 1024
-        //     const T* lds_base = &dst_gl_to_st.data[0] + (warpid() * elem_per_warp);
-
-        //     /***** END GLOBAL TO SHARED VARS *****/
-
-        //     /***** START SHARED TO REGISTER VARS *****/
-
-        //     // auto as_subtile_temp = kittens::subtile_inplace<BLOCK_SIZE_ROW / WARPS_ROW, k_step>(As[next], {warp_m, 0});
-        //     // load(a_temp, as_subtile_temp);
-        //     using RT = RT_A;
-        //     RT& dst_st_to_rt = a_temp;
-        //     auto as_subtile_temp = kittens::subtile_inplace<BLOCK_SIZE_ROW / WARPS_ROW, k_step>(As[next], {warp_m, 0});
-        //     using ST_SUB = typeof(as_subtile_temp);
-        //     const ST_SUB& src_st_to_rt = as_subtile_temp;
-
-        //     using U  = ST_SUB::dtype;
-        //     uint32_t addr_st_to_rt = reinterpret_cast<uintptr_t>(&src_st_to_rt.data[laneid() * (16 / sizeof(U))]);
-
-        //     /***** END SHARED TO REGISTER VARS *****/
-
-        //     /***** START MMA VARS *****/
-
-        //     // this is doing the kth mma
-        //     // mma_ABt(c, a, b, c);
-        //     using D = RT_C;
-        //     D& d_mma = c;
-        //     const RT_A& a_mma = a;
-        //     const RT_B& b_mma = b;
-        //     const RT_C& c_mma = c;
-
-        //     /***** END MMA VARS *****/
-
-        //     buffer_load_lds<T, ST, N_THREADS>(0, lds_base, srsrc, row_stride);
-        //     __builtin_amdgcn_sched_barrier(0);
-        //     ds_read_128_bits<RT, ST_SUB, U>(dst_st_to_rt, addr_st_to_rt, 0, 0, 0);
-        //     ds_read_128_bits<RT, ST_SUB, U>(dst_st_to_rt, addr_st_to_rt, 0, 0, 1);
-        //     __builtin_amdgcn_sched_barrier(0);
-        //     mma_ABt_base_wrapper(d_mma, a_mma, b_mma, c_mma, 1, 0, 0);
-        //     mma_ABt_base_wrapper(d_mma, a_mma, b_mma, c_mma, 0, 0, 0);
-
-        //     __builtin_amdgcn_sched_barrier(0);
-
-        //     buffer_load_lds<T, ST, N_THREADS>(1, lds_base, srsrc, row_stride);
-        //     __builtin_amdgcn_sched_barrier(0);
-        //     ds_read_128_bits<RT, ST_SUB, U>(dst_st_to_rt, addr_st_to_rt, 0, 1, 0);
-        //     ds_read_128_bits<RT, ST_SUB, U>(dst_st_to_rt, addr_st_to_rt, 0, 1, 1);
-        //     __builtin_amdgcn_sched_barrier(0);
-        //     mma_ABt_base_wrapper(d_mma, a_mma, b_mma, d_mma, 1, 0, 1);
-        //     mma_ABt_base_wrapper(d_mma, a_mma, b_mma, d_mma, 0, 0, 1);
-
-        //     __builtin_amdgcn_sched_barrier(0);
-
-        //     buffer_load_lds<T, ST, N_THREADS>(2, lds_base, srsrc, row_stride);
-        //     __builtin_amdgcn_sched_barrier(0);
-        //     ds_read_128_bits<RT, ST_SUB, U>(dst_st_to_rt, addr_st_to_rt, 1, 0, 0);
-        //     ds_read_128_bits<RT, ST_SUB, U>(dst_st_to_rt, addr_st_to_rt, 1, 0, 1);
-        //     __builtin_amdgcn_sched_barrier(0);
-        //     mma_ABt_base_wrapper(d_mma, a_mma, b_mma, c_mma, 1, 1, 0);
-        //     mma_ABt_base_wrapper(d_mma, a_mma, b_mma, c_mma, 0, 1, 0);
-
-        //     __builtin_amdgcn_sched_barrier(0);
-
-        //     buffer_load_lds<T, ST, N_THREADS>(3, lds_base, srsrc, row_stride);
-        //     __builtin_amdgcn_sched_barrier(0);
-        //     mma_ABt_base_wrapper(d_mma, a_mma, b_mma, d_mma, 0, 1, 1);
-
-        //     __builtin_amdgcn_sched_barrier(0);
-
-        //     buffer_load_lds<T, ST, N_THREADS>(4, lds_base, srsrc, row_stride);
-        //     __builtin_amdgcn_sched_barrier(0);
-        //     mma_ABt_base_wrapper(d_mma, a_mma, b_mma, c_mma, 0, 2, 0);
-
-        //     __builtin_amdgcn_sched_barrier(0);
-
-        //     buffer_load_lds<T, ST, N_THREADS>(5, lds_base, srsrc, row_stride);
-        //     __builtin_amdgcn_sched_barrier(0);
-        //     mma_ABt_base_wrapper(d_mma, a_mma, b_mma, d_mma, 0, 2, 1);
-
-        //     __builtin_amdgcn_sched_barrier(0);
-
-        //     buffer_load_lds<T, ST, N_THREADS>(6, lds_base, srsrc, row_stride);
-        //     __builtin_amdgcn_sched_barrier(0);
-        //     mma_ABt_base_wrapper(d_mma, a_mma, b_mma, c_mma, 0, 3, 0);
-
-        //     __builtin_amdgcn_sched_barrier(0);
-
-        //     buffer_load_lds<T, ST, N_THREADS>(7, lds_base, srsrc, row_stride);
-        //     __builtin_amdgcn_sched_barrier(0);
-        //     mma_ABt_base_wrapper(d_mma, a_mma, b_mma, d_mma, 0, 3, 1);
-
-        //     __builtin_amdgcn_sched_barrier(0);
-
-        //     ds_read_128_bits<RT, ST_SUB, U>(dst_st_to_rt, addr_st_to_rt, 1, 1, 0);
-        //     ds_read_128_bits<RT, ST_SUB, U>(dst_st_to_rt, addr_st_to_rt, 1, 1, 1);
-        //     mma_ABt_base_wrapper(d_mma, a_mma, b_mma, d_mma, 1, 1, 1);
-        //     __builtin_amdgcn_sched_barrier(0);
-
-        //     ds_read_128_bits<RT, ST_SUB, U>(dst_st_to_rt, addr_st_to_rt, 2, 0, 0);
-        //     ds_read_128_bits<RT, ST_SUB, U>(dst_st_to_rt, addr_st_to_rt, 2, 0, 1);
-        //     mma_ABt_base_wrapper(d_mma, a_mma, b_mma, c_mma, 1, 2, 0);
-        //     __builtin_amdgcn_sched_barrier(0);
-
-        //     ds_read_128_bits<RT, ST_SUB, U>(dst_st_to_rt, addr_st_to_rt, 2, 1, 0);
-        //     ds_read_128_bits<RT, ST_SUB, U>(dst_st_to_rt, addr_st_to_rt, 2, 1, 1);
-        //     mma_ABt_base_wrapper(d_mma, a_mma, b_mma, d_mma, 1, 2, 1);
-        //     __builtin_amdgcn_sched_barrier(0);
-
-        //     ds_read_128_bits<RT, ST_SUB, U>(dst_st_to_rt, addr_st_to_rt, 3, 0, 0);
-        //     ds_read_128_bits<RT, ST_SUB, U>(dst_st_to_rt, addr_st_to_rt, 3, 0, 1);
-        //     mma_ABt_base_wrapper(d_mma, a_mma, b_mma, c_mma, 1, 3, 0);
-        //     __builtin_amdgcn_sched_barrier(0);
-
-        //     ds_read_128_bits<RT, ST_SUB, U>(dst_st_to_rt, addr_st_to_rt, 3, 1, 0);
-        //     ds_read_128_bits<RT, ST_SUB, U>(dst_st_to_rt, addr_st_to_rt, 3, 1, 1);
-        //     mma_ABt_base_wrapper(d_mma, a_mma, b_mma, d_mma, 1, 3, 1);
-        //     __builtin_amdgcn_sched_barrier(0);
-        // }
-
 template <int M, int N, int K>
 __global__ __launch_bounds__(256, 1) void matmul_device(const kittens::gl<fp8e4m3, 1, 1, M, K> A, const kittens::gl<fp8e4m3, 1, 1, N, K> B, const kittens::gl<bf16, 1, 1, M, N> C) {
     constexpr int WARPS_COL = 2;
@@ -744,7 +605,42 @@ __global__ __launch_bounds__(256, 1) void matmul_device(const kittens::gl<fp8e4m
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
 
-        load_gl_to_st<2, false, kittens::ducks::rt_layout::row, ST_A, kittens::gl<fp8e4m3, 1, 1, M, K>, coord<ST_A>, NUM_WARPS*WARP_THREADS>(As[curr][0], A, {0, 0, block_row*WARPS_ROW, k + 2});
+        // load_gl_to_st<2, false, kittens::ducks::rt_layout::row, ST_A, kittens::gl<fp8e4m3, 1, 1, M, K>, coord<ST_A>, NUM_WARPS*WARP_THREADS>(As[curr][0], A, {0, 0, block_row*WARPS_ROW, k + 2});
+        {
+            using ST_GL_TO_ST = ST_A;
+            using GL_GL_TO_ST = GL_A;
+
+            ST_GL_TO_ST& dst_gl_to_st = As[curr][0];
+            const GL_GL_TO_ST& src_gl_to_st = A;
+            const coord<ST_GL_TO_ST> idx_gl_to_st = {0, 0, block_row*WARPS_ROW, k + 2};
+
+            constexpr int axis_gl_to_st = 2;
+            constexpr int N_THREADS_gl_to_st = NUM_WARPS*WARP_THREADS;
+
+            using T = typename ST_GL_TO_ST::dtype;
+            static_assert(sizeof(T) == 2 || sizeof(T) == 1, "only supporting 16 and 8-bit dtypes");
+            constexpr int memcpy_per_tile_gl_to_st =  ST_GL_TO_ST::rows * ST_GL_TO_ST::cols * sizeof(T) / (16 * N_THREADS_gl_to_st); // 16 --> 32
+            static_assert(memcpy_per_tile_gl_to_st > 0, "memcpy_per_tile must be greater than 0. Please decrease the number of threads.");
+            
+            constexpr int elem_per_thread_gl_to_st = 16 / sizeof(T);  // 8 if bf16, 16 if fp8
+            constexpr int elem_per_warp_gl_to_st = elem_per_thread_gl_to_st * kittens::WARP_THREADS; // 512 if bf16, 1024 if fp8
+            const int laneid_gl_to_st = kittens::laneid();
+            const int warp_id_gl_to_st = warpid();
+            const int row_stride_gl_to_st = src_gl_to_st.template stride<axis_gl_to_st>();
+
+            constexpr int num_warps_gl_to_st = N_THREADS_gl_to_st / 64;
+
+            coord<> unit_coord_gl_to_st = idx_gl_to_st.template unit_coord<axis_gl_to_st, 3>();
+            T* global_ptr_gl_to_st = (T*)&src_gl_to_st[unit_coord_gl_to_st];
+            i32x4 srsrc_gl_to_st = make_srsrc(global_ptr_gl_to_st, row_stride_gl_to_st * ST_GL_TO_ST::rows * sizeof(T));
+
+            const T* lds_base_gl_to_st = &dst_gl_to_st.data[0] + (warp_id_gl_to_st * elem_per_warp_gl_to_st);
+
+            buffer_load_lds<T, ST_GL_TO_ST, N_THREADS_gl_to_st>(0, lds_base_gl_to_st, srsrc_gl_to_st, row_stride_gl_to_st);
+            buffer_load_lds<T, ST_GL_TO_ST, N_THREADS_gl_to_st>(1, lds_base_gl_to_st, srsrc_gl_to_st, row_stride_gl_to_st);
+            buffer_load_lds<T, ST_GL_TO_ST, N_THREADS_gl_to_st>(2, lds_base_gl_to_st, srsrc_gl_to_st, row_stride_gl_to_st);
+            buffer_load_lds<T, ST_GL_TO_ST, N_THREADS_gl_to_st>(3, lds_base_gl_to_st, srsrc_gl_to_st, row_stride_gl_to_st);
+        }
 
         __builtin_amdgcn_sched_barrier(0);
         asm volatile("s_waitcnt lgkmcnt(0)");
