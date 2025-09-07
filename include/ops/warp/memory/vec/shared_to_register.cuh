@@ -49,6 +49,9 @@ __device__ inline static void load(RV &dst, const SV &src) {
         }
     }
     else if constexpr (std::is_same_v<typename RV::layout, accum_align_l>) {
+
+        const int lane_offset = 4*(laneid/16) + laneid%4;
+        const uint32_t addr = reinterpret_cast<uintptr_t>(&src.data[0]) + lane_offset * sizeof(U);
         #pragma unroll
         for(auto w = 0; w < dst.outer_dim; w++) {
             // int idx = w*32 + 4*(laneid/32);
@@ -60,8 +63,14 @@ __device__ inline static void load(RV &dst, const SV &src) {
             //         dst[w][i * 2 + j] = base_types::convertor<T2, U2>::convert(*(U2*)&src.data[idx + i * 8 + j * 2]);
             //     }
             // }
-            int idx = w*16 + 4*(laneid/16) + laneid%4;
-            dst[w][0] = base_types::convertor<T, U>::convert(src.data[idx]);
+            // int idx = w * 16 + lane_offset;
+            // dst[w][0] = base_types::convertor<T, U>::convert(src.data[idx]);
+            asm volatile(
+                "ds_read_b32 %0, %1 offset:%2\n"
+                : "=v"(dst[w][0])
+                : "v"(addr), "i"(w * 16 * sizeof(U))
+                : "memory"
+            );
         }
     }
     else if constexpr (std::is_same_v<typename RV::layout, ortho_l>) {
