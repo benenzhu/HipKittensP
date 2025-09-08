@@ -364,9 +364,9 @@ __global__ void attend_bwd_combined_ker(const attn_bwd_combined_globals<D> g) {
     __builtin_amdgcn_s_barrier();
     __builtin_amdgcn_sched_barrier(0);
 
-    // if (stagger) {
-    //     __builtin_amdgcn_s_barrier();
-    // }
+    if (stagger) {
+        __builtin_amdgcn_s_barrier();
+    }
 
     // 6. Load K_j and V_j from HBM to registers
     load(V_j, g.V, {batch_idx, head_idx, j, 0});
@@ -739,9 +739,9 @@ __global__ void attend_bwd_combined_ker(const attn_bwd_combined_globals<D> g) {
         __builtin_amdgcn_sched_barrier(0);
     }
 
-    // if (!stagger) {
-    //     __builtin_amdgcn_s_barrier();
-    // }
+    if (!stagger) {
+        __builtin_amdgcn_s_barrier();
+    }
 
     // 18. Write dK_j and dV_j back to HBM
     kv_tile<D, float, accum_row_l, mfma_32x32x16> dK_j, dV_j;
