@@ -19,7 +19,7 @@ from transformers import (AutoTokenizer, AutoModel,get_linear_schedule_with_warm
 
 use_base = False
 use_aiter = False
-use_hipkittens = True 
+use_hipkittens = True
 PRE_TRAINED_MODEL_NAME = "bert-base-cased"
 EPOCHS = 10
 BATCH_SIZE = 16
@@ -123,7 +123,7 @@ def create_data_loader(df: pd.DataFrame, tokenizer, max_len: int, batch_size: in
         num_workers=2 if os.name != "nt" else 0,
         pin_memory=torch.cuda.is_available(),
         shuffle=True,
-        drop_last=False,
+        drop_last=True,
     )
 
 # ----------------------------
