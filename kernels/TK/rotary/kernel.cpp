@@ -4,10 +4,10 @@
 #define NUM_WORKERS (1) 
 #define NUM_THREADS (NUM_WORKERS*kittens::WARP_THREADS)
 
-constexpr int ATTN_B = 1;
-constexpr int ATTN_H = 1;
-constexpr int N = 64;
-constexpr int head_dim = 64;                   
+constexpr int ATTN_B = 16;
+constexpr int ATTN_H = 16;
+constexpr int N = 1024;
+constexpr int head_dim = 128;                   
 constexpr float rope_embd_fraction = 1.0f;
 
 // Make these constexpr so they can be used as template parameters
