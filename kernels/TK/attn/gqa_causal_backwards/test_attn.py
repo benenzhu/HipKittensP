@@ -1,7 +1,7 @@
 import torch
 import random
 import math
-import tk_kernel_bkwd
+import tk_kernel_causal_bkwd
 import aiter
 
 torch.cuda.set_device(7)
@@ -17,11 +17,11 @@ torch.set_printoptions(
 
 
 causal = True
-b = 16
-h_q = 64  # number of query heads  
+b = 8
+h_q = 16  # number of query heads  
 h_kv = 8  # number of key/value heads (for GQA)
 group_size = h_q // h_kv  # queries per KV head group
-n = 1024
+n = 2048
 d = 128
 dtype = torch.bfloat16
 mean = 10
@@ -263,13 +263,13 @@ delta_tk = torch.zeros((b, h_q, n, 1), device='cuda').float().transpose(-1, -2).
 print("Running ThunderKittens ...")
 timings = []
 for _ in range(num_warmup):
-    tk_kernel_bkwd.dispatch_prep(
+    tk_kernel_causal_bkwd.dispatch_prep(
         O_tk,     # Og
         dO_tk,    # dOg
         delta_tk, # delta
     )
 
-    tk_kernel_bkwd.dispatch_bwd_combined(
+    tk_kernel_causal_bkwd.dispatch_bwd_combined(
         Q_tk,     
         K_tk,     
         V_tk,     
@@ -282,7 +282,7 @@ for _ in range(num_warmup):
         delta_tk
     )
 
-    tk_kernel_bkwd.dispatch_dq_shuffle(
+    tk_kernel_causal_bkwd.dispatch_dq_shuffle(
         dQ_tk_in,
         dQ_tk
     )
@@ -296,13 +296,13 @@ for _ in range(num_iters):
     torch.cuda.synchronize()
     start_event.record()
 
-    tk_kernel_bkwd.dispatch_prep(
+    tk_kernel_causal_bkwd.dispatch_prep(
         O_tk,     # Og
         dO_tk,    # dOg
         delta_tk, # delta
     )
 
-    tk_kernel_bkwd.dispatch_bwd_combined(
+    tk_kernel_causal_bkwd.dispatch_bwd_combined(
         Q_tk,     
         K_tk,     
         V_tk,     
@@ -315,7 +315,7 @@ for _ in range(num_iters):
         delta_tk
     )
 
-    tk_kernel_bkwd.dispatch_dq_shuffle(
+    tk_kernel_causal_bkwd.dispatch_dq_shuffle(
         dQ_tk_in,
         dQ_tk
     )

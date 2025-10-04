@@ -1,10 +1,10 @@
 #include "kittens.cuh"
 #include "pyutils/pyutils.cuh"
 
-constexpr int ATTN_B = 16; // batch size
-constexpr int ATTN_H = 64; // number of heads
+constexpr int ATTN_B = 8; // batch size
+constexpr int ATTN_H = 16; // number of heads
 constexpr int ATTN_H_KV = 8; // number of heads for key and value
-constexpr int ATTN_N = 1024; // sequence length
+constexpr int ATTN_N = 2048; // sequence length
 constexpr int ATTN_D = 128; // dimension
 constexpr int Q_BLOCK_SIZE = 32; // q block size
 constexpr int KV_BLOCK_SIZE = 64; // kv block size
@@ -54,6 +54,7 @@ __device__ inline static void mask_kv_tile(
     }
 }
 
+
 /**********************************************************/
 
 
@@ -73,7 +74,11 @@ __global__ void attend_ker(const attn_globals<D> g) {
     st_bf<KV_BLOCK_SIZE, ATTN_D, ducks::st_layout::row> (&k_smem)[2] = al.allocate<st_bf<KV_BLOCK_SIZE, ATTN_D, ducks::st_layout::row>, 2>();
     st_bf<KV_BLOCK_SIZE, ATTN_D, ducks::st_layout::accumulator_col> (&v_smem)[2] = al.allocate<st_bf<KV_BLOCK_SIZE, ATTN_D, ducks::st_layout::accumulator_col>, 2>();
     
-    const int head_idx = (blockIdx.x % 8) * 8 + (blockIdx.x / 8);
+    // if constexpr (ATTN_H == 64) { 
+    //     const int head_idx = (blockIdx.x % 8) * 8 + (blockIdx.x / 8);
+    // } else {
+    const int head_idx = blockIdx.x;
+    // }
     const int batch_idx = blockIdx.z;
     const int GROUP_SIZE = ATTN_H / ATTN_H_KV;
     const int head_idx_kv = head_idx / GROUP_SIZE;
@@ -156,7 +161,7 @@ __global__ void attend_ker(const attn_globals<D> g) {
     // Load K1 and prepare for next iteration
     load(k_reg, k_smem[1]);
     k_curr_idx = 1; 
-    G::load<1, false>(k_smem[0], g.Kg, {batch_idx, 2, head_idx_kv, 0});
+    G::load<1, false>(k_smem[0], g.Kg, {batch_idx, 2, head_idx_kv, 0}, swizzled_offsets_K);
     k_idx_buf0 = 2; 
     G::load<1, false>(v_smem[1], g.Vg, {batch_idx, 1, head_idx_kv, 0}, swizzled_offsets_V);
     __builtin_amdgcn_s_waitcnt(0);
@@ -280,8 +285,8 @@ __global__ void attend_ker(const attn_globals<D> g) {
 
     // Cluster 1:
     //      Load K5 into shared
-    G::load<1, false>(k_smem[1], g.Kg, {batch_idx, num_tiles - 1, head_idx_kv, 0}, swizzled_offsets_K);
-    k_idx_buf1 = num_tiles - 1;
+    G::load<1, false>(k_smem[1], g.Kg, {batch_idx, max_num_tiles - 1, head_idx_kv, 0}, swizzled_offsets_K);
+    k_idx_buf1 = max_num_tiles - 1;
     //      Load V2 into registers
     load(v_reg, v_smem[0]);
     if constexpr (causal) mask_kv_tile(att_block[1], tile_idx, k_curr_idx);
@@ -309,7 +314,7 @@ __global__ void attend_ker(const attn_globals<D> g) {
 
     // Cluster 3:
     //      Load V4 into shared
-    G::load<1, false>(v_smem[0], g.Vg, {batch_idx, num_tiles - 2, head_idx_kv, 0}, swizzled_offsets_V);
+    G::load<1, false>(v_smem[0], g.Vg, {batch_idx, max_num_tiles - 2, head_idx_kv, 0}, swizzled_offsets_V);
     //      Load K4 into registers
     load(k_reg, k_smem[0]);
     k_curr_idx = k_idx_buf0;
@@ -349,7 +354,6 @@ __global__ void attend_ker(const attn_globals<D> g) {
     mul_col(o_reg, o_reg, max_vec_prev);
     mma_AtB(o_reg, v_reg, att_block_bf16, o_reg);
     //      Partial softmax for QK4
-    // mul(att_block[0], att_block[0], TEMPERATURE_SCALE);
     copy(max_vec_prev, max_vec);
     col_max(max_vec, att_block[0], max_vec);
     sub_col(att_block[0], att_block[0], max_vec);
@@ -360,7 +364,7 @@ __global__ void attend_ker(const attn_globals<D> g) {
 
     // Cluster 7:
     //      Load V5 into shared
-    G::load<1, false>(v_smem[1], g.Vg, {batch_idx, num_tiles - 1, head_idx_kv, 0}, swizzled_offsets_V);
+    G::load<1, false>(v_smem[1], g.Vg, {batch_idx, max_num_tiles - 1, head_idx_kv, 0}, swizzled_offsets_V);
     //      Load K5 into registers
     load(k_reg, k_smem[1]);
     k_curr_idx = k_idx_buf1;
@@ -400,7 +404,6 @@ __global__ void attend_ker(const attn_globals<D> g) {
     mul_col(o_reg, o_reg, max_vec_prev);
     mma_AtB(o_reg, v_reg, att_block_bf16, o_reg);
     //      Full softmax for QK5
-    // mul(att_block[1], att_block[1], TEMPERATURE_SCALE);
     copy(max_vec_prev, max_vec);
     col_max(max_vec, att_block[1], max_vec);
     sub_col(att_block[1], att_block[1], max_vec);
@@ -450,16 +453,16 @@ __global__ void attend_ker(const attn_globals<D> g) {
 
 
 template<int D>
-void dispatch_micro(attn_globals<D> g) {
+void dispatch_fwd(attn_globals<D> g) {
     unsigned long mem_size = g.dynamic_shared_memory();
     hipFuncSetAttribute((void*)attend_ker<D>, hipFuncAttributeMaxDynamicSharedMemorySize, mem_size);
     attend_ker<D><<<g.grid(), g.block(), mem_size>>>(g);
     hipDeviceSynchronize();
 }
 
-PYBIND11_MODULE(tk_kernel, m) {
-    m.doc() = "tk_kernel python module";
-    py::bind_function<dispatch_micro<ATTN_D>>(m, "dispatch_micro", 
+PYBIND11_MODULE(tk_fwd_causal_kernel, m) {
+    m.doc() = "tk_fwd_causal_kernel python module";
+    py::bind_function<dispatch_fwd<ATTN_D>>(m, "dispatch_fwd", 
         &attn_globals<ATTN_D>::Qg, 
         &attn_globals<ATTN_D>::Kg, 
         &attn_globals<ATTN_D>::Vg, 

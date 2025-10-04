@@ -9,9 +9,9 @@ except ImportError:
     RotaryEmbedding = None
 
 
-from .attentions.base import SelfAttention
-from .attentions.aiter import AITERSelfAttention
-from .attentions.hipkittens import HipSelfAttention
+from .attentions.base import SelfAttention, CrossAttention
+from .attentions.aiter import AITERSelfAttention, AITERCrossAttention
+from .attentions.hipkittens import HipSelfAttention, HipCrossAttention
 
 
 class LinearResidual(nn.Linear):
@@ -122,12 +122,28 @@ class MHA(nn.Module):
             inner_attn_cls = HipSelfAttention
         else:
             inner_attn_cls = SelfAttention
+
+
+        inner_cross_attn_cls = None
+        if use_aiter_attn:
+            inner_cross_attn_cls = AITERCrossAttention
+        elif use_hip_attn:
+            inner_cross_attn_cls = HipCrossAttention
+        else:
+            inner_cross_attn_cls = CrossAttention
+
         self.Wqkv = wqkv_cls(embed_dim, qkv_dim, bias=qkv_proj_bias, **factory_kwargs)
         self.inner_attn = inner_attn_cls(
             causal=causal,
             softmax_scale=softmax_scale,
             attention_dropout=dropout,
         )
+        self.inner_cross_attn = inner_cross_attn_cls(
+            causal=causal, 
+            softmax_scale=softmax_scale, 
+            attention_dropout=dropout
+        )
+        
         self.out_proj = linear_cls(embed_dim, embed_dim, bias=out_proj_bias, **factory_kwargs)
 
     def allocate_inference_cache(self, batch_size, max_seqlen, dtype=None):

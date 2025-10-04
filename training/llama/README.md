@@ -14,9 +14,9 @@ We breakdown this section into three parts: 1) how to set up a training config a
 To train a new model, construct a config.yaml file at ```train/configs/experiment/```. You can launch using the following script:
 ```
 cd train/
-python train/run.py experiment=example/llama-1b trainer.devices=8        # pytorch
-python train/run.py experiment=example/llama-1b-aiter trainer.devices=1  # aiter
-python train/run.py experiment=example/llama-1b-hk trainer.devices=1     # hip
+CUDA_VISIBLE_DEVICES=0 python train/run.py experiment=example/llama-1b trainer.devices=1        # pytorch
+CUDA_VISIBLE_DEVICES=1 python train/run.py experiment=example/llama-1b-aiter trainer.devices=1  # aiter
+CUDA_VISIBLE_DEVICES=3 python train/run.py experiment=example/llama-1b-hk trainer.devices=1     # hip
 ```
 
 

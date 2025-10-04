@@ -1,5 +1,5 @@
 import torch
-import tk_kernel
+import tk_fwd_causal_kernel
 import random
 from torch.nn.functional import scaled_dot_product_attention
 import aiter
@@ -12,10 +12,10 @@ torch.set_printoptions(
 )
 
 # Inputs
-B = 16
-H = 64
+B = 8
+H = 16
 H_KV = 8
-N = 1024
+N = 2048
 D = 128
 causal = True
 dtype = torch.bfloat16
@@ -85,7 +85,7 @@ for _ in range(num_warmup):
     q = torch.randn(B, N, H, D, dtype=dtype, device='cuda', requires_grad=True)
     k = torch.randn(B, N, H_KV, D, dtype=dtype, device='cuda', requires_grad=True)
     v = torch.randn(B, N, H_KV, D, dtype=dtype, device='cuda', requires_grad=True)
-    tk_kernel.dispatch_micro(q, k, v, out, lse)
+    tk_fwd_causal_kernel.dispatch_fwd(q, k, v, out, lse)
 timings = []
 out = torch.zeros(B, N, H, D, dtype=dtype, device='cuda', requires_grad=True)
 lse = torch.zeros(B, H, 1, N, dtype=torch.float32, device='cuda', requires_grad=True)
@@ -97,7 +97,7 @@ for _ in range(num_iters):
     v = torch.randn(B, N, H_KV, D, dtype=dtype, device='cuda', requires_grad=True)
     torch.cuda.synchronize()
     start_event.record()
-    tk_kernel.dispatch_micro(q, k, v, out, lse)
+    tk_fwd_causal_kernel.dispatch_fwd(q, k, v, out, lse)
     end_event.record()
     torch.cuda.synchronize()
     elapsed_time = start_event.elapsed_time(end_event)
@@ -131,6 +131,20 @@ print(f"LSE: max_abs={l_diff.max().item():.6f}, max_rel={l_rel_error:.4f}, "
 
 
 # O-DIFFs
+
+
+warp_0_diff = o_diff[:, :512, :, 0:]
+print(f"Warp 0 diff: {warp_0_diff.max().item():.6f}")
+
+warp_1_diff = o_diff[:, 512:1024, :, 0:]
+print(f"Warp 1 diff: {warp_1_diff.max().item():.6f}")
+
+
+warp_2_diff = o_diff[:, 1024:1536, :, 0:]
+print(f"Warp 2 diff: {warp_2_diff.max().item():.6f}")
+
+warp_3_diff = o_diff[:, 1536:2048, :, 0:]
+print(f"Warp 3 diff: {warp_3_diff.max().item():.6f}")
 
 # warp_0_diff = o_diff[:, :32, :, 0:]
 # print(f"Warp 0 diff: {warp_0_diff.max().item():.6f}")

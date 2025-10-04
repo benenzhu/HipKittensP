@@ -1,11 +1,11 @@
 #include "kittens.cuh"
 #include "pyutils/pyutils.cuh"
 
-constexpr int ATTN_B = 16; // batch size
-constexpr int ATTN_H_Q = 64; // number of query heads
+constexpr int ATTN_B = 8; // batch size
+constexpr int ATTN_H_Q = 16; // number of query heads
 constexpr int ATTN_H_KV = 8; // number of key/value heads (for GQA)
 constexpr int GROUP_SIZE = ATTN_H_Q / ATTN_H_KV; // queries per KV head group
-constexpr int ATTN_N = 1024; // sequence length
+constexpr int ATTN_N = 2048; // sequence length
 constexpr int ATTN_D = 128; // dimension
 constexpr int STEP_QO = 64; // block size for QO
 constexpr int BLOCK_SIZE_KV = 256; // block size for KV
@@ -899,8 +899,8 @@ void dispatch_bwd_combined(attn_bwd_combined_globals<D> g) {
     hipDeviceSynchronize();
 }
 
-PYBIND11_MODULE(tk_kernel_bkwd, m) {
-    m.doc() = "tk_kernel python module";
+PYBIND11_MODULE(tk_kernel_causal_bkwd, m) {
+    m.doc() = "tk_kernel_causal_bkwd python module";
 
     py::bind_function<dispatch_prep<ATTN_D>>(m, "dispatch_prep", 
         &attn_prep_globals<ATTN_D>::Og, 
@@ -926,3 +926,5 @@ PYBIND11_MODULE(tk_kernel_bkwd, m) {
         &attn_dq_shuffle_globals<ATTN_D>::dQg_out
     );
 }
+
+

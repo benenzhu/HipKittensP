@@ -26,7 +26,7 @@ trainer:
   val_check_interval: ${eval:1000 * ${.accumulate_grad_batches}}
   max_steps: 20000
 
-expt_name: llama-1b-aiter
+expt_name: llama-1b-aiter-head=64-hkv=8-bs=8-n=2048-d=2048
 name: ${.expt_name}
 
 resume: true
@@ -37,12 +37,13 @@ callbacks:
 
 datamodule:
   batch_size: 8  # per gpu
-  batch_size_eval: 32
+  batch_size_eval: 8
 
 model:
   config:
-    n_embd: 1024
-    n_head: 16
+    n_embd: 2048
+    n_head: 64
+    n_head_kv: 8
     n_layer: 6
     _target_: "transformers.GPT2Config"
     rms_norm: true

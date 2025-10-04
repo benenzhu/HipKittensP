@@ -1,7 +1,7 @@
 # Compiler
 GPU_TARGET=CDNA4
 
-TARGET=tk_kernel_bkwd
+TARGET=tk_kernel_causal_bkwd
 SRC=GQA_bkwd.cpp
 
 # HIP variables
