@@ -18,16 +18,12 @@ __device__ inline void load(ST& dst, const GL& src, const COORD& idx)
 {
     using T = typename ST::dtype;
 
-    constexpr int bytes_per_thread = 16;
+    constexpr int bytes_per_thread = ST::underlying_subtile_bytes_per_thread;
+    constexpr int bytes_per_warp = bytes_per_thread * kittens::WARP_THREADS;
     constexpr int memcpy_per_tile = ST::rows * ST::cols * sizeof(T) / (bytes_per_thread * N_THREADS);
     static_assert(memcpy_per_tile > 0, "memcpy_per_tile must be greater than 0. Please decrease the number of threads.");
     
-    constexpr int elem_per_thread = bytes_per_thread / sizeof(T);
-    constexpr int elem_per_warp = elem_per_thread * kittens::WARP_THREADS;
-    constexpr int bytes_per_warp = elem_per_warp * sizeof(T);
     constexpr int num_warps = N_THREADS / kittens::WARP_THREADS;
-    constexpr int bytes_per_subtile_row = ST::underlying_subtile_cols * sizeof(T);
-    constexpr int bytes_per_subtile = bytes_per_subtile_row * ST::underlying_rows;
     const int laneid = kittens::laneid();
     const int warpid = kittens::warpid() % num_warps;
 
@@ -37,25 +33,26 @@ __device__ inline void load(ST& dst, const GL& src, const COORD& idx)
     T* global_ptr = (T*)&src[unit_coord];
     i32x4 srsrc = make_srsrc(global_ptr, row_stride * ST::rows * sizeof(T));
 
-    const T* lds_base = &dst.data[0] + (warpid * elem_per_warp);
+    const uintptr_t lds_base = reinterpret_cast<uintptr_t>(&dst.data[0]) + (warpid * bytes_per_warp);
 
     #pragma unroll
     for (int i = 0; i < memcpy_per_tile; i++) {
 
-        int lane_byte_offset = (laneid * bytes_per_thread) + (warpid * bytes_per_warp) + (i * num_warps * bytes_per_warp);
-        int subtile_id = lane_byte_offset / bytes_per_subtile;
-        lane_byte_offset = lane_byte_offset % bytes_per_subtile;
+        const int lane_byte_offset = (laneid * bytes_per_thread) + (warpid * bytes_per_warp) + (i * num_warps * bytes_per_warp);
+        const int subtile_id = lane_byte_offset / ST::underlying_subtile_bytes;
+        const int subtile_row = subtile_id / ST::underlying_subtiles_per_row;
+        const int subtile_col = subtile_id % ST::underlying_subtiles_per_row;
+        const int subtile_lane_byte_offset = lane_byte_offset % ST::underlying_subtile_bytes;
 
-        int row = lane_byte_offset / bytes_per_subtile_row;
-        int col = (lane_byte_offset % bytes_per_subtile_row) / sizeof(T);
-        uint32_t swizzled_shared_byte_offset = dst.idx((uint32_t)0, {row, col});
+        const int row = subtile_lane_byte_offset / ST::underlying_subtile_row_bytes;
+        const int col = (subtile_lane_byte_offset % ST::underlying_subtile_row_bytes) / sizeof(T);
+        const uint32_t swizzled_shared_byte_offset = ST::swizzle({row, col});
 
-        int swizzled_global_row = swizzled_shared_byte_offset / bytes_per_subtile_row;
-        int swizzled_global_col = (swizzled_shared_byte_offset % bytes_per_subtile_row) / sizeof(T) + subtile_id * ST::underlying_subtile_cols;
-        uint32_t swizzled_global_byte_offset = (swizzled_global_row * row_stride + swizzled_global_col) * sizeof(T);
+        const int swizzled_global_row = (swizzled_shared_byte_offset / ST::underlying_subtile_row_bytes) + subtile_row * ST::underlying_subtile_rows;
+        const int swizzled_global_col = (swizzled_shared_byte_offset % ST::underlying_subtile_row_bytes) / sizeof(T) + subtile_col * ST::underlying_subtile_cols;
+        const uint32_t swizzled_global_byte_offset = (swizzled_global_row * row_stride + swizzled_global_col) * sizeof(T);
 
-        const T* lds_elem_ptr = lds_base + (i * N_THREADS * elem_per_thread);
-        uintptr_t lds_addr = reinterpret_cast<uintptr_t>(lds_elem_ptr);
+        uintptr_t lds_addr = lds_base + (i * num_warps * bytes_per_warp);
         as3_uint32_ptr lds_ptr = (as3_uint32_ptr)(lds_addr);
 
         llvm_amdgcn_raw_buffer_load_lds(
@@ -80,18 +77,14 @@ template<int axis, bool assume_aligned,
 __device__ inline void prefill_swizzled_offsets(
     ST& dst, const GL& src, uint32_t* swizzled_offsets)
 {
-
     using T = typename ST::dtype;
-    constexpr int bytes_per_thread = 16;
+ 
+    constexpr int bytes_per_thread = ST::underlying_subtile_bytes_per_thread;
+    constexpr int bytes_per_warp = bytes_per_thread * kittens::WARP_THREADS;
     constexpr int memcpy_per_tile =  ST::rows * ST::cols * sizeof(T) / (bytes_per_thread * N_THREADS);
     static_assert(memcpy_per_tile > 0, "memcpy_per_tile must be greater than 0. Please decrease the number of threads.");
-    
-    constexpr int elem_per_thread = bytes_per_thread / sizeof(T);
-    constexpr int elem_per_warp = elem_per_thread * kittens::WARP_THREADS;
-    constexpr int bytes_per_warp = elem_per_warp * sizeof(T);
+
     constexpr int num_warps = N_THREADS / kittens::WARP_THREADS;
-    constexpr int bytes_per_subtile_row = ST::underlying_subtile_cols * sizeof(T);
-    constexpr int bytes_per_subtile = bytes_per_subtile_row * ST::underlying_rows;
     const int laneid = kittens::laneid();
     const int warpid = kittens::warpid() % num_warps;
 
@@ -99,17 +92,19 @@ __device__ inline void prefill_swizzled_offsets(
 
     #pragma unroll
     for (int i = 0; i < memcpy_per_tile; i++) {
-        int lane_byte_offset = (laneid * bytes_per_thread) + (warpid * bytes_per_warp) + (i * num_warps * bytes_per_warp);
-        int subtile_id = lane_byte_offset / bytes_per_subtile;
-        lane_byte_offset = lane_byte_offset % bytes_per_subtile;
+        const int lane_byte_offset = (laneid * bytes_per_thread) + (warpid * bytes_per_warp) + (i * num_warps * bytes_per_warp);
+        const int subtile_id = lane_byte_offset / ST::underlying_subtile_bytes;
+        const int subtile_row = subtile_id / ST::underlying_subtiles_per_row;
+        const int subtile_col = subtile_id % ST::underlying_subtiles_per_row;
+        const int subtile_lane_byte_offset = lane_byte_offset % ST::underlying_subtile_bytes;
 
-        int row = lane_byte_offset / bytes_per_subtile_row;
-        int col = (lane_byte_offset % bytes_per_subtile_row) / sizeof(T);
+        int row = subtile_lane_byte_offset / ST::underlying_subtile_row_bytes;
+        int col = (subtile_lane_byte_offset % ST::underlying_subtile_row_bytes) / sizeof(T);
+        const uint32_t swizzled_shared_byte_offset = ST::swizzle({row, col});
 
-        uint32_t swizzled_shared_byte_offset = dst.idx((uint32_t)0, {row, col});
-        int swizzled_global_row = swizzled_shared_byte_offset / bytes_per_subtile_row;
-        int swizzled_global_col = (swizzled_shared_byte_offset % bytes_per_subtile_row) / sizeof(T) + subtile_id * ST::underlying_subtile_cols;
-        uint32_t swizzled_global_byte_offset = (swizzled_global_row * row_stride + swizzled_global_col) * sizeof(T);
+        const int swizzled_global_row = (swizzled_shared_byte_offset / ST::underlying_subtile_row_bytes) + subtile_row * ST::underlying_subtile_rows;
+        const int swizzled_global_col = (swizzled_shared_byte_offset % ST::underlying_subtile_row_bytes) / sizeof(T) + subtile_id * ST::underlying_subtile_cols;
+        const uint32_t swizzled_global_byte_offset = (swizzled_global_row * row_stride + swizzled_global_col) * sizeof(T);
         swizzled_offsets[i] = swizzled_global_byte_offset;
     }
 }
@@ -122,12 +117,11 @@ __device__ inline void load(ST& dst, const GL& src, const COORD& idx, const uint
 {
     using T = typename ST::dtype;
 
-    constexpr int bytes_per_thread = 16;
+    constexpr int bytes_per_thread = ST::underlying_subtile_bytes_per_thread;
+    constexpr int bytes_per_warp = bytes_per_thread * kittens::WARP_THREADS;
     constexpr int memcpy_per_tile = ST::rows * ST::cols * sizeof(T) / (bytes_per_thread * N_THREADS);
     static_assert(memcpy_per_tile > 0, "memcpy_per_tile must be greater than 0. Please decrease the number of threads.");
     
-    constexpr int elem_per_thread = bytes_per_thread / sizeof(T);
-    constexpr int elem_per_warp = elem_per_thread * kittens::WARP_THREADS;
     constexpr int num_warps = N_THREADS / kittens::WARP_THREADS;
     const int laneid = kittens::laneid();
     const int warpid = kittens::warpid() % num_warps;
@@ -137,13 +131,12 @@ __device__ inline void load(ST& dst, const GL& src, const COORD& idx, const uint
     T* global_ptr = (T*)&src[unit_coord];
     i32x4 srsrc = make_srsrc(global_ptr, row_stride * ST::rows * sizeof(T));
 
-    const T* lds_base = &dst.data[0] + (warpid * elem_per_warp);
+    const uintptr_t lds_base = reinterpret_cast<uintptr_t>(&dst.data[0]) + (warpid * bytes_per_warp);
 
     #pragma unroll
     for (int i = 0; i < memcpy_per_tile; i++) {
 
-        const T* lds_elem_ptr = lds_base + (i * N_THREADS * elem_per_thread);
-        uintptr_t lds_addr = reinterpret_cast<uintptr_t>(lds_elem_ptr);
+        const uintptr_t lds_addr = lds_base + (i * num_warps * bytes_per_warp);
         as3_uint32_ptr lds_ptr = (as3_uint32_ptr)(lds_addr);
 
         llvm_amdgcn_raw_buffer_load_lds(
@@ -179,16 +172,14 @@ __device__ static inline void store(const GL &dst, const ST &src, const COORD &i
     using T = typename ST::dtype;
     using U = typename GL::dtype;
 
-    constexpr int bytes_per_thread = 16;
+    static_assert(std::is_same_v<T, U>, "T and U must be the same type");
+
+    constexpr int bytes_per_thread = ST::underlying_subtile_bytes_per_thread;
+    constexpr int bytes_per_warp = bytes_per_thread * kittens::WARP_THREADS;
     constexpr int memcpy_per_tile =  ST::rows * ST::cols * sizeof(T) / (bytes_per_thread * N_THREADS);
     static_assert(memcpy_per_tile > 0, "memcpy_per_tile must be greater than 0. Please decrease the number of threads.");
 
-    const int elem_per_thread = bytes_per_thread / sizeof(T);
-    constexpr int elem_per_warp = elem_per_thread * kittens::WARP_THREADS;
-    constexpr int bytes_per_warp = elem_per_warp * sizeof(T);
     constexpr int num_warps = N_THREADS / kittens::WARP_THREADS;
-    constexpr int bytes_per_subtile_row = ST::underlying_subtile_cols * sizeof(T);
-    constexpr int bytes_per_subtile = bytes_per_subtile_row * ST::underlying_rows;
     const int laneid = kittens::laneid();
     const int warpid = kittens::warpid() % num_warps;
 
@@ -200,20 +191,26 @@ __device__ static inline void store(const GL &dst, const ST &src, const COORD &i
 
     #pragma unroll
     for (int i = 0; i < memcpy_per_tile; i++) {
-        int lane_byte_offset = (laneid * bytes_per_thread) + (warpid * bytes_per_warp) + (i * num_warps * bytes_per_warp);
-        int subtile_id = lane_byte_offset / bytes_per_subtile;
-        lane_byte_offset = lane_byte_offset % bytes_per_subtile;
+        const int lane_byte_offset = (laneid * bytes_per_thread) + (warpid * bytes_per_warp) + (i * num_warps * bytes_per_warp);
+        const int subtile_id = lane_byte_offset / ST::underlying_subtile_bytes;
+        const int subtile_row = subtile_id / ST::underlying_subtiles_per_row;
+        const int subtile_col = subtile_id % ST::underlying_subtiles_per_row;
+        const int subtile_lane_byte_offset = lane_byte_offset % ST::underlying_subtile_bytes;
 
-        int row = lane_byte_offset / bytes_per_subtile_row;
-        int col = (lane_byte_offset % bytes_per_subtile_row) / sizeof(T) + subtile_id * ST::underlying_subtile_cols;
+        const int row = subtile_lane_byte_offset / ST::underlying_subtile_row_bytes;
+        const int col = (subtile_lane_byte_offset % ST::underlying_subtile_row_bytes) / sizeof(T);
+        const uint32_t swizzled_shared_byte_offset = ST::swizzle({row, col});
 
-        int global_byte_offset = (row * row_stride + col) * sizeof(T);
+        const int swizzled_global_row = (swizzled_shared_byte_offset / ST::underlying_subtile_row_bytes) + subtile_row * ST::underlying_subtile_rows;
+        const int swizzled_global_col = (swizzled_shared_byte_offset % ST::underlying_subtile_row_bytes) / sizeof(T) + subtile_col * ST::underlying_subtile_cols;
+        const uint32_t swizzled_global_byte_offset = (swizzled_global_row * row_stride + swizzled_global_col) * sizeof(T);
 
-        U* dst_elem_ptr = (U*)(dst_ptr + global_byte_offset);
+        U* dst_elem_ptr = (U*)(dst_ptr + swizzled_global_byte_offset);
+        T* src_elem_ptr = (T*)(src_ptr + lane_byte_offset);
 
         #pragma unroll
         for (int j = 0; j < bytes_per_thread / sizeof(T); j++) {
-            dst_elem_ptr[j] = src[{row, col + j}];
+            dst_elem_ptr[j] = src_elem_ptr[j];
         }
     }
 }

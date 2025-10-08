@@ -24,14 +24,16 @@ namespace kittens {
  * @param[out] dst The destination tile.
  * @param[in] src The source tile.
  */
-template<typename T, typename U, int _height, int _width>
-__device__ static inline void copy(st<T, _height, _width> &dst, const st<U, _height, _width> &src) {
-    #pragma unroll
-    for(int i = laneid(); i < dst.num_elements; i+=kittens::WARP_THREADS) {
-        int row = i/dst.cols, col = i%dst.cols;
-        dst[{row, col}] = base_types::convertor<T, U>::convert(src[{row, col}]);
-    }
-}
+
+// TODO: Implement this
+// template<typename T, typename U, int _height, int _width, ducks::st_shape::all _shape>
+// __device__ static inline void copy(st<T, _height, _width, _shape> &dst, const st<U, _height, _width, _shape> &src) {
+//     #pragma unroll
+//     for(int i = laneid(); i < dst.num_elements; i+=kittens::WARP_THREADS) {
+//         const int row = i/dst.cols, col = i%dst.cols;
+//         dst[{row, col}] = base_types::convertor<T, U>::convert(src[{row, col}]);
+//     }
+// }
 
 /* ----------  SUBTILE  ---------- */
 
