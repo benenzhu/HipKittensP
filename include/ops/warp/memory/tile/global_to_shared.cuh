@@ -228,12 +228,6 @@ __device__ inline void load(ST& dst, const GL& src, const COORD& idx, const uint
             uintptr_t lds_addr = lds_base + (memcpy_per_tile * num_warps * bytes_per_warp);
             as3_uint32_ptr lds_ptr = (as3_uint32_ptr)(lds_addr);
 
-            if (threadIdx.x == 64) {
-                printf("swizzled_offsets[memcpy_per_tile]: %d\n", swizzled_offsets[memcpy_per_tile]);
-                printf("lds_addr: %d\n", lds_addr);
-                printf("warpid: %d\n", warpid);
-            }
-
             llvm_amdgcn_raw_buffer_load_lds(
                 srsrc, // buffer resource
                 lds_ptr,
