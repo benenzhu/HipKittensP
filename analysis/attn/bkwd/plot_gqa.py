@@ -2,6 +2,47 @@ import json
 import matplotlib.pyplot as plt
 import numpy as np
 
+
+
+mi355x_baselines_causal = {
+    # triton not available for gqa bwd attn
+    "ck": {
+        "1024": 449.97,
+        "2048": 707.80,
+        "4096": 829.07,
+        "8192": 894.56,
+        "16384": 991.03,
+    },
+    "torch": {
+        "1024": 34,
+        "2048": 36,
+        "4096": 37,
+        "8192": "OOM",
+        "16384": "OOM",
+    }
+}
+
+
+mi355x_baselines_non_causal = {
+    # triton not available for gqa bwd attn
+    "ck": {
+        "1024": 352.54,
+        "2048": 418.05,
+        "4096": 438.59,
+        "8192": 458.98,
+        "16384": 462.01,
+    },
+    "torch": {
+        "1024": 72,
+        "2048": 79,
+        "4096": 83,
+        "8192": "OOM",
+        "16384": "OOM",
+    }
+}
+
+
+
 colors = ["#8E69B8", "#E59952", "#68AC5A", "#7CB9BC"]
 
 for device in ['mi350x']:
