@@ -34,6 +34,7 @@ template<int _d_model> struct rotary_globals {
     o_gl o;
     sin_gl sin;
     cos_gl cos;
+    hipStream_t stream;
 
     dim3 grid() { return dim3(ATTN_H, (ATTN_B + NUM_WORKERS - 1) / NUM_WORKERS, ATTN_N / BLOCK_SIZE); }
     dim3 block() { return dim3(NUM_THREADS); }
@@ -65,10 +66,8 @@ __global__ void tk_fused_rotary(const rotary_globals<D> g) {
         for (int j = 0; j < PT; ++j) {
             const auto x1 = x_reg.tiles[0][i].data[j];
             const auto x2 = x_reg.tiles[0][i + half_dim_tiles].data[j];
-            const auto lo = __hsub2(__hmul2(x1, cos_reg.tiles[0][i].data[j]), __hmul2(x2, sin_reg.tiles[0][i].data[j]));
-            const auto hi = __hadd2(__hmul2(x2, cos_reg.tiles[0][i].data[j]), __hmul2(x1, sin_reg.tiles[0][i].data[j]));
-            x_reg.tiles[0][i].data[j]  = lo;
-            x_reg.tiles[0][i + half_dim_tiles].data[j] = hi; 
+            x_reg.tiles[0][i].data[j] = __hsub2(__hmul2(x1, cos_reg.tiles[0][i].data[j]), __hmul2(x2, sin_reg.tiles[0][i].data[j]));
+            x_reg.tiles[0][i + half_dim_tiles].data[j] = __hadd2(__hmul2(x2, cos_reg.tiles[0][i].data[j]), __hmul2(x1, sin_reg.tiles[0][i].data[j]));
         }
     }
     store(g.o, x_reg, {b, h, n, 0}); 
@@ -78,8 +77,7 @@ template<int D>
 void dispatch_rotary(rotary_globals<D> g) {
     unsigned long mem_size = g.dynamic_shared_memory();
     hipFuncSetAttribute((void*)tk_fused_rotary<D>, hipFuncAttributeMaxDynamicSharedMemorySize, mem_size);
-    tk_fused_rotary<D><<<g.grid(), g.block(), mem_size>>>(g);
-    hipDeviceSynchronize();
+    tk_fused_rotary<D><<<g.grid(), g.block(), mem_size, g.stream>>>(g);
 }
 
 PYBIND11_MODULE(tk_kernel, m) {
