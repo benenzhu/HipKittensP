@@ -72,6 +72,7 @@ template<int _d_model> struct norm_globals {
     o_resid_gl o_resid;
     norm_weight_gl norm_weight;
     norm_bias_gl norm_bias;
+    hipStream_t stream;
 
     const int n_per_tile = 4;
     const int n_tile_size = N / n_per_tile;
@@ -130,8 +131,7 @@ template<int D>
 void dispatch_micro(norm_globals<D> g) {
     unsigned long mem_size = g.dynamic_shared_memory();
     hipFuncSetAttribute((void*)layernorm_tk<D>, hipFuncAttributeMaxDynamicSharedMemorySize, mem_size);
-    layernorm_tk<D><<<g.grid(), g.block(), mem_size>>>(g);
-    hipDeviceSynchronize();
+    layernorm_tk<D><<<g.grid(), g.block(), mem_size, g.stream>>>(g);
 }
 
 PYBIND11_MODULE(tk_kernel, m) {

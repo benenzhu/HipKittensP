@@ -11,7 +11,6 @@ constexpr int REG_BLOCK_M      = BLOCK_SIZE / WARPS_M;
 constexpr int REG_BLOCK_N      = BLOCK_SIZE / WARPS_N;
 constexpr int HALF_REG_BLOCK_M = REG_BLOCK_M / 2;
 constexpr int HALF_REG_BLOCK_N = REG_BLOCK_N / 2;
-constexpr int DOT_SLICE        = 32;
 
 #define NUM_WARPS (WARPS_M * WARPS_N)
 #define NUM_THREADS (kittens::WARP_THREADS * NUM_WARPS)

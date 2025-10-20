@@ -1,13 +1,13 @@
 {
     "1024": {
         "avg_time_hipblaslt": 9.51,
-        "tflops_hipblaslt": 225813,
+        "tflops_hipblaslt": 2258.13,
         "avg_time": 0.016,
         "tflops": 132.94
     },
     "2048": {
         "avg_time_hipblaslt": 16.33,
-        "tflops_hipblaslt": 1.05204e+06,
+        "tflops_hipblaslt":1052.04, 
         "avg_time": 0.025,
         "tflops": 694.34
     },
