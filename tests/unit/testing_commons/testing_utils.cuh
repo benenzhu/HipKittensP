@@ -176,6 +176,8 @@ test_result validate(T *d_i, T *d_o, const std::vector<float> &i_ref, std::vecto
     bool good = true;
     for(int i = 0; i < output_size; i++) {
         if(abs(o_ref[i] - o[i]) > eps) {
+            printf("o_ref[%d]: %f, o[%d]: %f\n", i, o_ref[i], i, o[i]);
+            printf("abs(o_ref[%d] - o[%d]): %f\n", i, i, abs(o_ref[i] - o[i]));
             good = false;
             break;
         }

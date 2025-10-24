@@ -35,6 +35,9 @@ __device__ static inline void row_reduce(V &row_accum, const T &src, const V &sr
     using RT = V::dtype;
     using RT2 = base_types::packing<RT>::packed_type;
 
+    const int leader = laneid() % T::base_tile_rows;
+    const int max_shift = T::base_tile_threads_per_reduction / 2;
+
     #pragma unroll
     for(int i = 0; i < src.height; i++) {
         dtype accum_packed = src.tiles[i][0].data[0];
@@ -51,19 +54,19 @@ __device__ static inline void row_reduce(V &row_accum, const T &src, const V &sr
         }
         RT accum_single = op::template op<RT>(accum_packed.x, accum_packed.y);
 
-        if constexpr (std::is_same_v<RT, float>) {
-            accum_single = op::template op<RT>(accum_single, __shfl(accum_single, laneid() ^ 16));
-            accum_single = op::template op<RT>(accum_single, __shfl(accum_single, laneid() ^ 32));
-        }
-        else if constexpr (std::is_same_v<RT, bf16>) {
+        if constexpr (std::is_same_v<RT, bf16> && T::base_tile_rows == 32) {
             uint2_t res = __builtin_amdgcn_permlane32_swap(__bfloat16_as_ushort(accum_single), __bfloat16_as_ushort(accum_single), false, true);
             accum_single = op::template op<RT>(__ushort_as_bfloat16(res.x), __ushort_as_bfloat16(res.y));
         }
-        else if constexpr (std::is_same_v<RT, half>) {
+        else if constexpr (std::is_same_v<RT, half> && T::base_tile_rows == 32) {
             uint2_t res = __builtin_amdgcn_permlane32_swap(__half_as_ushort(accum_single), __half_as_ushort(accum_single), false, true);
             accum_single = op::template op<RT>(__ushort_as_half(res.x), __ushort_as_half(res.y));
         } else {
-            static_assert(false, "Unsupported type");
+            for (int shift = max_shift; shift > 0; shift--) {
+                accum_single = op::template op<RT>(accum_single, __shfl_down(accum_single, shift * T::base_tile_rows));
+            }
+
+            accum_single = __shfl(accum_single, leader);
         }
 
         if(reset) {
@@ -100,10 +103,9 @@ __device__ static inline void row_reduce(V &row_accum, const T &src, const V &sr
     using RT2 = V::dtype;
     using RT = base_types::packing<RT2>::unpacked_type;
 
-    const int leader = (laneid() / 32) * 32;
+    const int leader = (laneid() / T::base_tile_cols) * T::base_tile_cols;
     const int packed_per_tile = src.packed_per_base_tile;
-    const int max_shift = 16;
-
+    const int max_shift = T::base_tile_cols / 2;
 
     RT2 accum[packed_per_tile];
 
@@ -128,7 +130,7 @@ __device__ static inline void row_reduce(V &row_accum, const T &src, const V &sr
             }
         }
 
-        if(reset) {
+        if constexpr (reset) {
             #pragma unroll
             for(int k = 0; k < packed_per_tile; k++) {
                 row_accum[i][k] = accum[k];
@@ -174,9 +176,9 @@ __device__ static inline void col_reduce(V &col_accum, const T &src, const V &sr
     using RT2 = V::dtype;
     using RT = base_types::packing<RT2>::unpacked_type;
 
-    const int leader = (laneid() / 32) * 32;
-    const int packed_per_tile = src.packed_per_base_tile;
-    const int max_shift = 16;
+    const int leader = (laneid() / T::base_tile_rows) * T::base_tile_rows;
+    constexpr int packed_per_tile = T::packed_per_base_tile;
+    constexpr int max_shift = T::base_tile_rows / 2;
 
     RT2 accum[packed_per_tile];
 
@@ -201,22 +203,16 @@ __device__ static inline void col_reduce(V &col_accum, const T &src, const V &sr
             }
         }
 
-        if(reset) {
-            #pragma unroll
-            for(int k = 0; k < packed_per_tile; k++) {
-                col_accum[j][k] = accum[k];
-            }
-        }
-        else {
-            #pragma unroll
-            for(int k = 0; k < packed_per_tile; k++) {
-                col_accum[j][k] = op::template op<RT2>(src_accum[j][k], accum[k]);
-            }
-        }
-
         #pragma unroll
         for(int k = 0; k < packed_per_tile; k++) {
-            col_accum[j][k] = packed_shfl(MASK_ALL, col_accum[j][k], leader);
+            RT2 result;
+            if constexpr (reset) {
+                result = accum[k];
+            }
+            else {
+                result = op::template op<RT2>(src_accum[j][k], accum[k]);
+            }
+            col_accum[j][k] = packed_shfl(MASK_ALL, result, leader);
         }
     }
 }
@@ -244,6 +240,9 @@ __device__ static inline void col_reduce(V &col_accum, const T &src, const V &sr
     static_assert(std::is_same_v<RT2, typename T::dtype>); // compatible type
     static_assert(V::outer_dim == T::width); // compatible size
 
+    const int leader = laneid() % T::base_tile_cols;
+    const int max_shift = T::base_tile_threads_per_reduction / 2;
+
     #pragma unroll
     for(int j = 0; j < src.width; j++) { // note now width is the outer loop
         RT2 accum_packed = src.tiles[0][j].data[0];
@@ -266,19 +265,19 @@ __device__ static inline void col_reduce(V &col_accum, const T &src, const V &sr
         //   step 1: use permlane32_swap() to swap the row 2 and 3 of acc and
         //           the row 0 and 1 of the copy of acc
         //   step 2: apply reduction to the result values to get final result
-        if constexpr (std::is_same_v<RT, float>) {
-            uint2_t res = __builtin_amdgcn_permlane32_swap(__float_as_uint(accum_single), __float_as_uint(accum_single), false, true);
-            accum_single = op::template op<RT>(__uint_as_float(res.x), __uint_as_float(res.y));
-        }
-        else if constexpr (std::is_same_v<RT, bf16>) {
+        if constexpr (std::is_same_v<RT, bf16> && T::base_tile_cols == 32) {
             uint2_t res = __builtin_amdgcn_permlane32_swap(__bfloat16_as_ushort(accum_single), __bfloat16_as_ushort(accum_single), false, true);
             accum_single = op::template op<RT>(__ushort_as_bfloat16(res.x), __ushort_as_bfloat16(res.y));
         }
-        else if constexpr (std::is_same_v<RT, half>) {
+        else if constexpr (std::is_same_v<RT, half> && T::base_tile_cols == 32) {
             uint2_t res = __builtin_amdgcn_permlane32_swap(__half_as_ushort(accum_single), __half_as_ushort(accum_single), false, true);
             accum_single = op::template op<RT>(__ushort_as_half(res.x), __ushort_as_half(res.y));
         } else {
-            static_assert(false, "Unsupported type");
+            for (int shift = max_shift; shift > 0; shift--) {
+                accum_single = op::template op<RT>(accum_single, __shfl_down(accum_single, shift * T::base_tile_cols));
+            }
+
+            accum_single = __shfl(accum_single, leader);
         }
 
         if(reset) {

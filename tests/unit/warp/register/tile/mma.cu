@@ -28,6 +28,8 @@ struct test_mma_AB {
 
         kittens::load(a, a_input, {});
         kittens::load(b, b_input, {});
+        __builtin_amdgcn_s_waitcnt(0);
+        __builtin_amdgcn_s_barrier();
         kittens::zero(c);
         kittens::mma_AB(c, a, b, c);
         kittens::store(c_output, c, {});
@@ -61,6 +63,8 @@ struct test_mma_ABt {
         kittens::rt_fl<RT_SHAPE_ACCUM::rows*H, RT_SHAPE_ACCUM::cols*W, kittens::ducks::rt_layout::col, RT_SHAPE_ACCUM> c;
         kittens::load(a, a_input, {});
         kittens::load(b, b_input, {});
+        __builtin_amdgcn_s_waitcnt(0);
+        __builtin_amdgcn_s_barrier();
         kittens::zero(c);
         kittens::mma_ABt(c, a, b, c);
         kittens::store(c_output, c, {});
@@ -94,6 +98,8 @@ struct test_mma_AtB {
         kittens::rt_fl<RT_SHAPE_ACCUM::rows*H, RT_SHAPE_ACCUM::cols*W, kittens::ducks::rt_layout::col, RT_SHAPE_ACCUM> c;
         kittens::load(a, a_input, {});
         kittens::load(b, b_input, {});
+        __builtin_amdgcn_s_waitcnt(0);
+        __builtin_amdgcn_s_barrier();
         kittens::zero(c);
         kittens::mma_AtB(c, a, b, c);
         kittens::store(c_output, c, {});
@@ -127,6 +133,8 @@ struct test_mma_AtBt {
         kittens::rt_fl<RT_SHAPE_ACCUM::rows*H, RT_SHAPE_ACCUM::cols*W, kittens::ducks::rt_layout::col, RT_SHAPE_ACCUM> c;
         kittens::load(a, a_input, {});
         kittens::load(b, b_input, {});
+        __builtin_amdgcn_s_waitcnt(0);
+        __builtin_amdgcn_s_barrier();
         kittens::zero(c);
         kittens::mma_AtBt(c, a, b, c);
         kittens::store(c_output, c, {});

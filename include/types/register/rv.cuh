@@ -55,13 +55,13 @@ struct rv {
     static constexpr bool is_ortho = std::is_same_v<layout, ducks::rv_layout::ortho>;
     using T = kittens::base_types::packing<_T>::unpacked_type;
     using T2 = kittens::base_types::packing<_T>::packed_type;
-    using dtype = T;
+    using dtype = std::conditional_t<is_naive || is_ortho, T, T2>;
     static constexpr int packing = kittens::base_types::packing<_T>::num();
 
     static constexpr int length = _length; ///< Length in elements.
     static_assert(length % _tile_length == 0, "Length must be divisible by the tile dimension");
     static constexpr int tiles  = _length / _tile_length; ///< Length in subtiles, aliased for consistency with sv type
-    static constexpr int inner_dim = is_naive ? length / kittens::WARP_THREADS : (is_ortho ? 1 : 1);
+    static constexpr int inner_dim = is_naive ? length / kittens::WARP_THREADS : (is_ortho ? 1 : shape::elements_per_thread / packing);
     static constexpr int outer_dim = is_naive ? 1 : tiles;
 
     // For align layout

@@ -344,7 +344,7 @@ struct wrapper_2d {
             );
             global_wrapper_2d<test, RT_SHAPE, ST_SHAPE, dtype, H, W, NUM_WORKERS, GL, args...><<<1, NUM_WORKERS*kittens::WARP_THREADS, kittens::MAX_SHARED_MEMORY / 2>>>(input, output);
             // fill in correct results on cpu
-            test::template host_func<H, W, NUM_WORKERS, GL, args...>(i_ref, o_ref);
+            test::template host_func<RT_SHAPE, ST_SHAPE, H, W, NUM_WORKERS, GL, args...>(i_ref, o_ref);
             // check and cleanup
 
             int is_fp8 = (this_result.label.find("fp8") != std::string::npos) || (this_result.label.find("e4m3") != std::string::npos) || (this_result.label.find("e5m2") != std::string::npos);
