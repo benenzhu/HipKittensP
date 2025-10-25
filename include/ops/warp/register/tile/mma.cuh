@@ -16,12 +16,13 @@ __device__ static inline void mfma161632(      float2 (&D)[2],
                                          const float2 (&C)[2]) {
     
     typedef __attribute__((__vector_size__(8 * sizeof(__fp16)))) __fp16 fp16x8_t;
-    (*(float4*)D).data = {__builtin_amdgcn_mfma_f32_16x16x32_f16(
+    typedef __attribute__((__vector_size__(4 * sizeof(float)))) float floatx4_t;
+    *(floatx4_t*)D = __builtin_amdgcn_mfma_f32_16x16x32_f16(
         (*(fp16x8_t*)A),
         (*(fp16x8_t*)B),
-        (*(float4*)C).data,
+        *(floatx4_t*)C,
         0, 0, 0
-    )};
+    );
 }
 
 __device__ static inline void mfma161632(      float2 (&D)[2],
@@ -30,12 +31,13 @@ __device__ static inline void mfma161632(      float2 (&D)[2],
                                          const float2 (&C)[2]) {
 
     typedef __attribute__((__vector_size__(8 * sizeof(__bf16)))) __bf16 bf16x8_t;
-    (*(float4*)D).data = {__builtin_amdgcn_mfma_f32_16x16x32_bf16(
+    typedef __attribute__((__vector_size__(4 * sizeof(float)))) float floatx4_t;
+    *(floatx4_t*)D = __builtin_amdgcn_mfma_f32_16x16x32_bf16(
         (*(bf16x8_t*)A),
         (*(bf16x8_t*)B),
-        (*(float4*)C).data,
+        *(floatx4_t*)C,
         0, 0, 0
-    )};
+    );
 }
 __device__ static inline void mfma323216(      float2 (&D)[8],
                                          const bf16_2 (&A)[4],
