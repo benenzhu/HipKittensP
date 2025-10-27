@@ -2,7 +2,7 @@
 #include "pyutils/pyutils.cuh"
 using namespace kittens;
 
-constexpr int BLOCK_SIZE       = 64;  
+constexpr int BLOCK_SIZE       = 128;  
 constexpr int K_STEP           = 64;
 constexpr int REG_BLOCK        = BLOCK_SIZE / 4;
 constexpr int DOT_SLICE        = 16;
