@@ -128,12 +128,12 @@ def simple_flash_backward(Q, K, V, dO, L):
 # **************************************************
 
 
-causal = True
+causal = False
 b = 16
 h_q = 64  # number of query heads  
 h_kv = 8  # number of key/value heads (for GQA)
 group_size = h_q // h_kv  # queries per KV head group
-n = 2048
+n = 16384
 d = 128
 dtype = torch.bfloat16
 mean = 10
@@ -163,41 +163,41 @@ def generate_inputs():
 # Generate base inputs in BHND format
 Q_bhnd, K_bhnd, V_bhnd, dO_bhnd = generate_inputs()
 
-# **************************************************
-# Pytorch forward and backward
-# **************************************************
+# # **************************************************
+# # Pytorch forward and backward
+# # **************************************************
 
-for _ in range(num_warmup):
-    q_pt = Q_bhnd.detach().requires_grad_(True)
-    k_pt = K_bhnd.detach().requires_grad_(True)
-    v_pt = V_bhnd.detach().requires_grad_(True)
-    out_pt = torch.nn.functional.scaled_dot_product_attention(
-                q_pt, k_pt, v_pt, attn_mask=None, dropout_p=0.0, is_causal=causal)
-    out_pt.backward(dO_bhnd)
+# for _ in range(num_warmup):
+#     q_pt = Q_bhnd.detach().requires_grad_(True)
+#     k_pt = K_bhnd.detach().requires_grad_(True)
+#     v_pt = V_bhnd.detach().requires_grad_(True)
+#     out_pt = torch.nn.functional.scaled_dot_product_attention(
+#                 q_pt, k_pt, v_pt, attn_mask=None, dropout_p=0.0, is_causal=causal)
+#     out_pt.backward(dO_bhnd)
 
-timings_pt = []
-for _ in range(num_iters):
-    q_pt = Q_bhnd.detach().requires_grad_(True)
-    k_pt = K_bhnd.detach().requires_grad_(True)
-    v_pt = V_bhnd.detach().requires_grad_(True)
-    out_pt = torch.nn.functional.scaled_dot_product_attention(
-                q_pt, k_pt, v_pt, attn_mask=None, dropout_p=0.0, is_causal=causal)
-    torch.cuda.synchronize()
-    start_event.record()
-    out_pt.backward(dO_bhnd)
-    end_event.record()
-    torch.cuda.synchronize()
-    elapsed_time = start_event.elapsed_time(end_event)
-    timings_pt.append(elapsed_time)
+# timings_pt = []
+# for _ in range(num_iters):
+#     q_pt = Q_bhnd.detach().requires_grad_(True)
+#     k_pt = K_bhnd.detach().requires_grad_(True)
+#     v_pt = V_bhnd.detach().requires_grad_(True)
+#     out_pt = torch.nn.functional.scaled_dot_product_attention(
+#                 q_pt, k_pt, v_pt, attn_mask=None, dropout_p=0.0, is_causal=causal)
+#     torch.cuda.synchronize()
+#     start_event.record()
+#     out_pt.backward(dO_bhnd)
+#     end_event.record()
+#     torch.cuda.synchronize()
+#     elapsed_time = start_event.elapsed_time(end_event)
+#     timings_pt.append(elapsed_time)
 
-avg_time_pt = sum(timings_pt) / len(timings_pt)
-eff_pt = efficiency(flops_ref, avg_time_pt)
-print(f"PyTorch reference average execution time: {avg_time_pt:.4f} ms")
-print(f"PyTorch reference performance: {eff_pt:.2f} TFLOPS for {b=} h_q={h_q} h_kv={h_kv} {n=} {d=} {causal=}.\n")
+# avg_time_pt = sum(timings_pt) / len(timings_pt)
+# eff_pt = efficiency(flops_ref, avg_time_pt)
+# print(f"PyTorch reference average execution time: {avg_time_pt:.4f} ms")
+# print(f"PyTorch reference performance: {eff_pt:.2f} TFLOPS for {b=} h_q={h_q} h_kv={h_kv} {n=} {d=} {causal=}.\n")
 
-q_grad_pt = q_pt.grad
-k_grad_pt = k_pt.grad
-v_grad_pt = v_pt.grad
+# q_grad_pt = q_pt.grad
+# k_grad_pt = k_pt.grad
+# v_grad_pt = v_pt.grad
 
 # **************************************************
 # AITER forward and backward
@@ -244,61 +244,61 @@ if use_aiter:
     v_grad_aiter_bhnd = v_grad_aiter_bnhd.transpose(1, 2)  # BNHD -> BHND
 
 
+# # # **************************************************
+# # Comparisons
 # # **************************************************
-# Comparisons
-# **************************************************
 
-num_print = 8
+# num_print = 8
 
-# TK vs AITER
-print(f"\nTK vs AITER comparison:")
-print("\nO outputs:")
-print("PyTorch: ", out_pt[0, 0, :num_print, 0], "Max:", out_pt.max().item())
-print("AITER: ", out_aiter_bhnd[0, 0, :num_print, 0], "Max:", out_aiter_bhnd.max().item())
+# # TK vs AITER
+# print(f"\nTK vs AITER comparison:")
+# print("\nO outputs:")
+# print("PyTorch: ", out_pt[0, 0, :num_print, 0], "Max:", out_pt.max().item())
+# print("AITER: ", out_aiter_bhnd[0, 0, :num_print, 0], "Max:", out_aiter_bhnd.max().item())
 
-print()
-print("\nGradient K outputs:")
-print("PyTorch: ", k_grad_pt[0, 0, 0, :num_print], "Max:", k_grad_pt.max().item())
-print("AITER: ", k_grad_aiter_bhnd[0, 0, 0, :num_print], "Max:", k_grad_aiter_bhnd.max().item())
+# print()
+# print("\nGradient K outputs:")
+# print("PyTorch: ", k_grad_pt[0, 0, 0, :num_print], "Max:", k_grad_pt.max().item())
+# print("AITER: ", k_grad_aiter_bhnd[0, 0, 0, :num_print], "Max:", k_grad_aiter_bhnd.max().item())
 
-print()
-print("Gradient V outputs:")
-print("PyTorch: ", v_grad_pt[0, 0, 0, :num_print], "Max:", v_grad_pt.max().item())
-print("AITER: ", v_grad_aiter_bhnd[0, 0, 0, :num_print], "Max:", v_grad_aiter_bhnd.max().item())
+# print()
+# print("Gradient V outputs:")
+# print("PyTorch: ", v_grad_pt[0, 0, 0, :num_print], "Max:", v_grad_pt.max().item())
+# print("AITER: ", v_grad_aiter_bhnd[0, 0, 0, :num_print], "Max:", v_grad_aiter_bhnd.max().item())
 
-print()
-print("Gradient Q outputs:")
-print("PyTorch: ", q_grad_pt[0, 0, 0, :num_print], "Max:", q_grad_pt.max().item())
-print("AITER: ", q_grad_aiter_bhnd[0, 0, 0, :num_print], "Max:", q_grad_aiter_bhnd.max().item())
-# print("Diff: ", (dQ_tk - q_grad_aiter_bnhd)[0, :, 0, 32:48], "Max:", (dQ_tk - q_grad_aiter_bnhd).max().item())
+# print()
+# print("Gradient Q outputs:")
+# print("PyTorch: ", q_grad_pt[0, 0, 0, :num_print], "Max:", q_grad_pt.max().item())
+# print("AITER: ", q_grad_aiter_bhnd[0, 0, 0, :num_print], "Max:", q_grad_aiter_bhnd.max().item())
+# # print("Diff: ", (dQ_tk - q_grad_aiter_bnhd)[0, :, 0, 32:48], "Max:", (dQ_tk - q_grad_aiter_bnhd).max().item())
 
 
-# **************************************************
-# TK vs AITER (robust tolerances & metrics)
-# **************************************************
-# Compare O and L with AITER
-print(f"\nRobustness checks (TK vs AITER):") 
-o_diff, o_err_cnt, o_total, o_rel_error, o_l2_error, o_cos, o_mask = robustness_check(out_pt, out_aiter_bhnd)
-print(f"O: max_abs={o_diff.max().item():.6f}, max_rel={o_rel_error:.4f}, "
-      f"rel_l2={o_l2_error:.4f}, cos={o_cos:.6f}, "
-      f"errors={o_err_cnt}/{o_total} ({100*o_err_cnt/o_total:.4f}%)")
+# # **************************************************
+# # TK vs AITER (robust tolerances & metrics)
+# # **************************************************
+# # Compare O and L with AITER
+# print(f"\nRobustness checks (TK vs AITER):") 
+# o_diff, o_err_cnt, o_total, o_rel_error, o_l2_error, o_cos, o_mask = robustness_check(out_pt, out_aiter_bhnd)
+# print(f"O: max_abs={o_diff.max().item():.6f}, max_rel={o_rel_error:.4f}, "
+#       f"rel_l2={o_l2_error:.4f}, cos={o_cos:.6f}, "
+#       f"errors={o_err_cnt}/{o_total} ({100*o_err_cnt/o_total:.4f}%)")
 
-# **************************************************
-# TK vs AITER (gradient comparisons)
-# **************************************************
-print(f"\nGradient comparisons (TK vs AITER):") 
+# # **************************************************
+# # TK vs AITER (gradient comparisons)
+# # **************************************************
+# print(f"\nGradient comparisons (TK vs AITER):") 
 
-# Compute diffs in float32 to avoid bf16 quantization in the comparison itself
-q_diff, q_err_cnt, q_total, q_rel_error, q_l2_error, q_cos, q_mask = robustness_check(q_grad_pt, q_grad_aiter_bhnd)
-k_diff, k_err_cnt, k_total, k_rel_error, k_l2_error, k_cos, k_mask = robustness_check(k_grad_pt, k_grad_aiter_bhnd)
-v_diff, v_err_cnt, v_total, v_rel_error, v_l2_error, v_cos, v_mask = robustness_check(v_grad_pt, v_grad_aiter_bhnd)
+# # Compute diffs in float32 to avoid bf16 quantization in the comparison itself
+# q_diff, q_err_cnt, q_total, q_rel_error, q_l2_error, q_cos, q_mask = robustness_check(q_grad_pt, q_grad_aiter_bhnd)
+# k_diff, k_err_cnt, k_total, k_rel_error, k_l2_error, k_cos, k_mask = robustness_check(k_grad_pt, k_grad_aiter_bhnd)
+# v_diff, v_err_cnt, v_total, v_rel_error, v_l2_error, v_cos, v_mask = robustness_check(v_grad_pt, v_grad_aiter_bhnd)
 
-print(f"Q grad: max_abs={q_diff.max().item():.6f}, max_rel={q_rel_error:.4f}, "
-        f"rel_l2={q_l2_error:.4f}, cos={q_cos:.6f}, "
-      f"errors={q_err_cnt}/{q_total} ({100*q_err_cnt/q_total:.4f}%)")
-print(f"K grad: max_abs={k_diff.max().item():.6f}, max_rel={k_rel_error:.4f}, "
-      f"rel_l2={k_l2_error:.4f}, cos={k_cos:.6f}, "
-      f"errors={k_err_cnt}/{k_total} ({100*k_err_cnt/k_total:.4f}%)")
-print(f"V grad: max_abs={v_diff.max().item():.6f}, max_rel={v_rel_error:.4f}, "
-      f"rel_l2={v_l2_error:.4f}, cos={v_cos:.6f}, "
-      f"errors={v_err_cnt}/{v_total} ({100*v_err_cnt/v_total:.4f}%)")
+# print(f"Q grad: max_abs={q_diff.max().item():.6f}, max_rel={q_rel_error:.4f}, "
+#         f"rel_l2={q_l2_error:.4f}, cos={q_cos:.6f}, "
+#       f"errors={q_err_cnt}/{q_total} ({100*q_err_cnt/q_total:.4f}%)")
+# print(f"K grad: max_abs={k_diff.max().item():.6f}, max_rel={k_rel_error:.4f}, "
+#       f"rel_l2={k_l2_error:.4f}, cos={k_cos:.6f}, "
+#       f"errors={k_err_cnt}/{k_total} ({100*k_err_cnt/k_total:.4f}%)")
+# print(f"V grad: max_abs={v_diff.max().item():.6f}, max_rel={v_rel_error:.4f}, "
+#       f"rel_l2={v_l2_error:.4f}, cos={v_cos:.6f}, "
+#       f"errors={v_err_cnt}/{v_total} ({100*v_err_cnt/v_total:.4f}%)")

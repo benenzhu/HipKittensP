@@ -61,14 +61,14 @@ class matmul(torch.autograd.Function):
 
         if matmul._debug:
             print(f"M,N,K={M},{N},{K} ; BLK_M,N,K={BLK_M},{BLK_N},{BLK_K}")
-            print(f"{total_blocks_M=} x {total_blocks_N=} = {total_tiles=}")
-            print(f"{total_tiles_streamk=} + {total_blocking_tiles=} = {total_tiles=}")
-            print(f"{total_programs_streamk=}")
-            print(f"{total_blocking_tiles=}")
-            print(f"{total_full_tiles_streamk=}")
-            print(f"{iters_per_tile=}")
-            print(f"{total_iters_streamk=}")
-            print("total_remainder_iters_streamk=", total_partial_tiles_streamk)
+            # print(f"{total_blocks_M=} x {total_blocks_N=} = {total_tiles=}")
+            # print(f"{total_tiles_streamk=} + {total_blocking_tiles=} = {total_tiles=}")
+            # print(f"{total_programs_streamk=}")
+            # print(f"{total_blocking_tiles=}")
+            # print(f"{total_full_tiles_streamk=}")
+            # print(f"{iters_per_tile=}")
+            # print(f"{total_iters_streamk=}")
+            # print("total_remainder_iters_streamk=", total_partial_tiles_streamk)
         use_bias = False
         # compute grid (work to do per SM on the first wave)
         grids = total_programs_streamk
@@ -133,65 +133,67 @@ perf = lambda ms: 2 * m * n * k * 1e-12 / (ms * 1e-3)
 
 ## test for tiles that is not multipe of 304 tiles
 # m, n, k = 1024, 1024, 1024  # some problem size to test
-# m, n, k = 2048, 2048, 2048  # some problem size to test
+m, n, k = 2048, 2048, 2048  # some problem size to test
 # m, n, k = 4096, 4096, 4096  # some problem size to test
 # m, n, k = 8192, 8192, 8192  # some problem size to test
-m, n, k = 16384, 16384, 16384  # some problem size to test
+# m, n, k = 16384, 16384, 16384  # some problem size to test
+
+for m, n, k in [(1024, 1024, 1024), (2048, 2048, 2048), (4096, 4096, 4096), (8192, 8192, 8192), (16384, 16384, 16384)]:
 
 
-A = torch.randn(m, k, device="cuda", dtype=torch.float16)
-B = torch.randn(n, k, device="cuda", dtype=torch.float16).T
-# allocates output
-C = torch.zeros((m, n), device="cuda", dtype=A.dtype)
-bias = torch.zeros((m, ), device="cuda", dtype=A.dtype)
-#bias = None
-BLK_M = 256
-BLK_N = 256
-BLK_K = 64
-total_blocks_M = triton.cdiv(m, BLK_M)
-total_blocks_N = triton.cdiv(n, BLK_N)
-total_tiles = total_blocks_M * total_blocks_N
-gsize_m = 8
-two_tiles = 'True'
-num_stages = 2
-num_warps = 8
-waves_per_eu = 0
-mfmaInstrSize = 16
-kpack = 1
+    A = torch.randn(m, k, device="cuda", dtype=torch.float16)
+    B = torch.randn(n, k, device="cuda", dtype=torch.float16).T
+    # allocates output
+    C = torch.zeros((m, n), device="cuda", dtype=A.dtype)
+    bias = torch.zeros((m, ), device="cuda", dtype=A.dtype)
+    #bias = None
+    BLK_M = 256
+    BLK_N = 256
+    BLK_K = 64
+    total_blocks_M = triton.cdiv(m, BLK_M)
+    total_blocks_N = triton.cdiv(n, BLK_N)
+    total_tiles = total_blocks_M * total_blocks_N
+    gsize_m = 8
+    two_tiles = 'True'
+    num_stages = 2
+    num_warps = 8
+    waves_per_eu = 0
+    mfmaInstrSize = 16
+    kpack = 1
 
 
-#for total_sm in range(1, 305):
-print(f"{total_sm=}")
-matmul.set_debug(True)
-locks = torch.zeros((total_sm, ), device="cuda", dtype=torch.int32)
-P = torch.zeros((total_sm, BLK_M * BLK_N), device="cuda", dtype=torch.float32)
-C = matmul.apply(A, B, C, bias, P, locks, total_sm, BLK_M, BLK_N, BLK_K, gsize_m, two_tiles, num_stages, num_warps,
-                 waves_per_eu, mfmaInstrSize, kpack)
-#exit(0)
-matmul.set_debug(False)
-expected = A @ B
+    #for total_sm in range(1, 305):
+    print(f"{total_sm=}")
+    matmul.set_debug(True)
+    locks = torch.zeros((total_sm, ), device="cuda", dtype=torch.int32)
+    P = torch.zeros((total_sm, BLK_M * BLK_N), device="cuda", dtype=torch.float32)
+    C = matmul.apply(A, B, C, bias, P, locks, total_sm, BLK_M, BLK_N, BLK_K, gsize_m, two_tiles, num_stages, num_warps,
+                    waves_per_eu, mfmaInstrSize, kpack)
+    #exit(0)
+    matmul.set_debug(False)
+    expected = A @ B
 
-assert torch.allclose(C, expected, atol=1), f"max: {(C - expected).abs().max().item()}\n{C}\n{expected}"
-print("pass validation test")
+    assert torch.allclose(C, expected, atol=1), f"max: {(C - expected).abs().max().item()}\n{C}\n{expected}"
+    # print("pass validation test")
 
-triton_ms = triton.testing.do_bench(lambda: torch.matmul(A, B))
-print(f"PyTorch: {triton_ms:.3f} ms  {perf(triton_ms):.3f} tflops")
+    triton_ms = triton.testing.do_bench(lambda: torch.matmul(A, B))
+    print(f"PyTorch: {triton_ms:.3f} ms  {perf(triton_ms):.3f} tflops")
 
-locks = torch.zeros((total_sm, ), device="cuda", dtype=torch.int32)
-P = torch.zeros((total_sm, BLK_M * BLK_N), device="cuda", dtype=torch.float32)
-triton_ms = triton.testing.do_bench(
-    lambda: matmul.apply(A, B, C, bias, P, locks, total_sm, BLK_M, BLK_N, BLK_K, gsize_m, two_tiles, num_stages,
-                         num_warps, waves_per_eu, mfmaInstrSize, kpack))
-print(f"hybrid stream-k (grid={total_sm}): {triton_ms:.3f} ms  {perf(triton_ms):.3f} tflops")
+    locks = torch.zeros((total_sm, ), device="cuda", dtype=torch.int32)
+    P = torch.zeros((total_sm, BLK_M * BLK_N), device="cuda", dtype=torch.float32)
+    triton_ms = triton.testing.do_bench(
+        lambda: matmul.apply(A, B, C, bias, P, locks, total_sm, BLK_M, BLK_N, BLK_K, gsize_m, two_tiles, num_stages,
+                            num_warps, waves_per_eu, mfmaInstrSize, kpack))
+    print(f"hybrid stream-k (grid={total_sm}): {triton_ms:.3f} ms  {perf(triton_ms):.3f} tflops")
 
-locks = torch.zeros((total_sm * 2, ), device="cuda", dtype=torch.int32)
-P = torch.zeros((total_sm * 2, BLK_M * BLK_N), device="cuda", dtype=torch.float32)
-triton_ms = triton.testing.do_bench(
-    lambda: matmul.apply(A, B, C, bias, P, locks, total_sm * 2, BLK_M, BLK_N, BLK_K, gsize_m, two_tiles, num_stages,
-                         num_warps, waves_per_eu, mfmaInstrSize, kpack))
-print(f"hybrid stream-k (grid={total_sm * 2}): {triton_ms:.3f} ms  {perf(triton_ms):.3f} tflops")
+    locks = torch.zeros((total_sm * 2, ), device="cuda", dtype=torch.int32)
+    P = torch.zeros((total_sm * 2, BLK_M * BLK_N), device="cuda", dtype=torch.float32)
+    triton_ms = triton.testing.do_bench(
+        lambda: matmul.apply(A, B, C, bias, P, locks, total_sm * 2, BLK_M, BLK_N, BLK_K, gsize_m, two_tiles, num_stages,
+                            num_warps, waves_per_eu, mfmaInstrSize, kpack))
+    print(f"hybrid stream-k (grid={total_sm * 2}): {triton_ms:.3f} ms  {perf(triton_ms):.3f} tflops")
 
-triton_ms = triton.testing.do_bench(
-    lambda: matmul.apply(A, B, C, bias, P, locks, total_tiles, BLK_M, BLK_N, BLK_K, gsize_m, two_tiles, num_stages,
-                         num_warps, waves_per_eu, mfmaInstrSize, kpack))
-print(f"tile matmul (grid={total_tiles}): {triton_ms:.3f} ms  {perf(triton_ms):.3f} tflops")
+    triton_ms = triton.testing.do_bench(
+        lambda: matmul.apply(A, B, C, bias, P, locks, total_tiles, BLK_M, BLK_N, BLK_K, gsize_m, two_tiles, num_stages,
+                            num_warps, waves_per_eu, mfmaInstrSize, kpack))
+    print(f"tile matmul (grid={total_tiles}): {triton_ms:.3f} ms  {perf(triton_ms):.3f} tflops")

@@ -56,7 +56,7 @@ void micro_tk(const micro_globals g) {
     // Original WGID.
     int wgid = (blockIdx.y * gridDim.x) + blockIdx.x;
     const int NUM_WGS  = gridDim.x * gridDim.y;
-    const int WGM = 8;
+    const int WGM = 4;
     // Swizzle chiplet so that wgids are in the same XCD.
     wgid = chiplet_transform_chunked(wgid, NUM_WGS, NUM_XCDS, WGM*WGM);
     // Swizzle for better L2 within the same XCD.

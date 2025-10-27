@@ -20,17 +20,17 @@ mi355x_baselines_causal = {
         "16384": 986.59,
     },
     "torch": {
-        "1024": 34,
-        "2048": 36,
-        "4096": 38,
-        "8192": 37,
-        "16384": "OOM",
+        "1024": 109.51,
+        "2048": 156.71,
+        "4096": 142.82,
+        "8192": 224.01,
+        "16384": 259.14,
     },
     "aiter": {
-        "1024": 375.72,
-        "2048": 654.68,
-        "4096": 902.16,
-        "8192": 1006.03,
+        "1024": 336.14,
+        "2048": 643.27,
+        "4096": 878.59,
+        "8192": 1044.64,
         "16384": 1110.15,
     },
     "hk": {
@@ -41,6 +41,7 @@ mi355x_baselines_causal = {
         "16384": 1015.41,
     }
 }
+
 
 mi350x_baselines_causal = {
     "triton": {
@@ -56,20 +57,25 @@ mi350x_baselines_causal = {
         "4096": 728.33,
         "8192": 813.47,
         "16384": 886.17,
+        # "1024": 486.96,
+        # "2048": 698.11,
+        # "4096": 798.88,
+        # "8192": 864.64,
+        # "16384": 938.82,
     },
     "torch": {
-        "1024": 31.582108,
-        "2048": 33.775558,
-        "4096": 35.817826,
-        "8192": 34.693869,
-        "16384": "OOM",
+        "1024": 103.58,
+        "2048": 145.20,
+        "4096": 131.52,
+        "8192": 208.90,
+        "16384": 239.38,
     },
     "aiter": {
-        "1024": 416.30,
-        "2048": 587.63,
-        "4096": 735.77,
-        "8192": 799.96,
-        "16384": 848.04,
+        "1024": 360.58,
+        "2048": 585.00,
+        "4096": 705.08,
+        "8192": 797.41,
+        "16384": 850.81,
     },
     "hk": {
         "1024": 349.09,
@@ -91,11 +97,11 @@ mi355x_baselines_non_causal = {
         "16384": 465.83,
     },
     "torch": {
-        "1024": 71,
-        "2048": 78,
-        "4096": 84,
-        "8192": 81,
-        "16384": "OOM",
+        "1024": 220.27,
+        "2048": 273.06,
+        "4096": 301.24,
+        "8192": 309.30,
+        "16384": 311.66,
     },
     "aiter": {
         "1024": 651.94,
@@ -113,6 +119,7 @@ mi355x_baselines_non_causal = {
     }
 }
 
+
 mi350x_baselines_non_causal = { 
     # triton not available for non-causal bwd attn
     "ck": {
@@ -123,11 +130,11 @@ mi350x_baselines_non_causal = {
         "16384": 443.33,
     },
     "torch": {
-        "1024": 70.188240,
-        "2048": 76.365602,
-        "4096": 81.948592,
-        "8192": 79.742189,
-        "16384": "OOM",
+        "1024": 207.01,
+        "2048": 254.13,
+        "4096": 274.05,
+        "8192": 286.45,
+        "16384": 290.61,
     },
     "aiter": {
         "1024": 596.54,
@@ -218,9 +225,9 @@ for device in ['mi350x', 'mi355x']:
 
         # Create bar chart
         x = np.arange(len(n_values))
-        width = 0.17
+        width = 0.19
 
-        fig, ax = plt.subplots(figsize=(16, 6))
+        fig, ax = plt.subplots(figsize=(10, 6))
 
         if triton_tflops:
             # 5 bars: PyTorch, Triton, CK, AITER, HipKittens
@@ -230,9 +237,9 @@ for device in ['mi350x', 'mi355x']:
             fourth_bar_start = x + width
             fifth_bar_start = x + 2*width
 
-            bars1 = ax.bar(first_bar_start, torch_vals, width, label='PyTorch SDPA', color=colors[4])
+            bars1 = ax.bar(first_bar_start, torch_vals, width, label='PyTorch SDPA', color=colors[1])
             bars2 = ax.bar(second_bar_start, triton_vals, width, label='Triton', color=colors[2])
-            bars3 = ax.bar(third_bar_start, ck_vals, width, label='Composable Kernel', color=colors[1])
+            bars3 = ax.bar(third_bar_start, ck_vals, width, label='Composable Kernel', color=colors[4])
             bars4 = ax.bar(fourth_bar_start, aiter_tflops, width, label='AITER', color=colors[0])
             bars5 = ax.bar(fifth_bar_start, tk_tflops, width, label='HipKittens', color=colors[3])
         else:
@@ -247,6 +254,8 @@ for device in ['mi350x', 'mi355x']:
             bars4 = ax.bar(third_bar_start, aiter_tflops, width, label='AITER', color=colors[0])
             bars5 = ax.bar(fourth_bar_start, tk_tflops, width, label='HipKittens', color=colors[3])
 
+        fontsize = 11
+
         # Plot X markers for OOM
         oom_height = 50  # Position X near top of chart
         if torch_oom:
@@ -255,47 +264,47 @@ for device in ['mi350x', 'mi355x']:
                 ax.plot(x[idx] + offset, oom_height, 'x', color=colors[4],
                        markersize=15, markeredgewidth=3)
                 ax.text(x[idx] + offset, oom_height + max_tflops * 0.03,
-                       'OOM', ha='center', va='bottom', fontsize=10, color=colors[4])
+                       'OOM', ha='center', va='bottom', fontsize=fontsize, color=colors[4])
 
         # Add value labels on bars
         for i, (bar, value) in enumerate(zip(bars1, torch_vals)):
             if value > 0:  # Only label non-OOM bars
                 height = bar.get_height()
                 ax.text(bar.get_x() + bar.get_width()/2., height + max_tflops * 0.01,
-                        f'{value:.0f}', ha='center', va='bottom', fontsize=14)
+                        f'{value:.0f}', ha='center', va='bottom', fontsize=fontsize)
 
         if triton_tflops:
             for bar, value in zip(bars2, triton_vals):
                 if value > 0:  # Only label non-OOM bars
                     height = bar.get_height()
                     ax.text(bar.get_x() + bar.get_width()/2., height + max_tflops * 0.01,
-                            f'{value:.0f}', ha='center', va='bottom', fontsize=14)
+                            f'{value:.0f}', ha='center', va='bottom', fontsize=fontsize)
 
         for bar, value in zip(bars3, ck_vals):
             if value > 0:  # Only label non-OOM bars
                 height = bar.get_height()
                 ax.text(bar.get_x() + bar.get_width()/2., height + max_tflops * 0.01,
-                        f'{value:.0f}', ha='center', va='bottom', fontsize=14)
+                        f'{value:.0f}', ha='center', va='bottom', fontsize=fontsize)
 
         for bar, value in zip(bars4, aiter_tflops):
             height = bar.get_height()
             ax.text(bar.get_x() + bar.get_width()/2., height + max_tflops * 0.01,
-                    f'{value:.0f}', ha='center', va='bottom', fontsize=14)
+                    f'{value:.0f}', ha='center', va='bottom', fontsize=fontsize)
 
         for bar, value in zip(bars5, tk_tflops):
             height = bar.get_height()
             ax.text(bar.get_x() + bar.get_width()/2., height + max_tflops * 0.01,
-                    f'{value:.0f}', ha='center', va='bottom', fontsize=14)
+                    f'{value:.0f}', ha='center', va='bottom', fontsize=fontsize)
 
         # add some padding to the top of the y-axis to prevent label overlap
         ax.set_ylim(0, max_tflops * 1.15)
-        ax.set_xlabel('Sequence Length (N)', fontsize=16)
+        ax.set_xlabel('Sequence Length', fontsize=16)
         ax.set_ylabel('Performance (TFLOPS)', fontsize=16)
         ax.set_title(f'MHA {title_suffix} Backward Performance Comparison {device.upper()}', fontsize=16)
         ax.set_xticks(x)
         ax.set_xticklabels([str(n) for n in n_values], fontsize=16)
         ax.tick_params(axis='y', labelsize=16)
-        ax.legend(fontsize=16)
+        ax.legend(fontsize=14)
 
         plt.tight_layout()
         plt.show()

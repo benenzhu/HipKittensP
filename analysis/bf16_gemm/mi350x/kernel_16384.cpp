@@ -57,9 +57,7 @@ void micro_tk(const micro_globals g) {
     int wgid = (blockIdx.y * gridDim.x) + blockIdx.x;
     const int NUM_WGS  = gridDim.x * gridDim.y;
 
-    int WGM;
-    if constexpr (M == 8192) { WGM = 8; }
-    else { WGM = 4; }
+    int WGM = 8;
     // Swizzle chiplet so that wgids are in the same XCD.
     wgid = chiplet_transform_chunked(wgid, NUM_WGS, NUM_XCDS, WGM*WGM);
     // Swizzle for better L2 within the same XCD.

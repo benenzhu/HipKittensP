@@ -7,16 +7,16 @@ colors = ["#8E69B8", "#E59952", "#68AC5A", "#7CB9BC", "#DE836B", "#55555A"]
 
 mi355x_baselines = {
     "triton": {
-        "1024": 130.300560,
-        "2048": 599,
-        "4096": 993.69,
-        "8192": 1143.91,
-        "16384": 1087.09,
+        "1024": 59.378,
+        "2048": 270.523,
+        "4096": 934.393,
+        "8192": 1090.526,
+        "16384": 1086.317,
     },
     "hipblaslt": {
         "1024": 165.829,
         "2048": 598.810,
-        "4096": 1111.09,
+        "4096": 1245.48,
         "8192": 1379.180,
         "16384": 1335.310,
     },
@@ -99,7 +99,7 @@ for device in ['mi300x', 'mi325x', 'mi350x', 'mi355x']:
         # rocblas_tflops = [mi350x_baselines['rocblas'][str(size)] for size in matrix_sizes]
 
     # Process data to separate OOM values
-    pytorch_vals, pytorch_oom = process_data(pytorch_tflops)
+    # pytorch_vals, pytorch_oom = process_data(pytorch_tflops)
     aiter_vals, aiter_oom = process_data(aiter_tflops)
     hipblaslt_vals, hipblaslt_oom = process_data(hipblaslt_tflops)
     tk_vals, tk_oom = process_data(tk_tflops)
@@ -107,59 +107,62 @@ for device in ['mi300x', 'mi325x', 'mi350x', 'mi355x']:
     # rocblas_vals, rocblas_oom = process_data(rocblas_tflops) if rocblas_tflops else ([], [])
     ck_vals, ck_oom = process_data(ck_tflops) if ck_tflops else ([], [])
 
-    max_tflops = max(max(pytorch_vals), max(aiter_vals), max(hipblaslt_vals), max(tk_vals), max(triton_vals), max(ck_vals))
+    max_tflops = max(max(aiter_vals), max(hipblaslt_vals), max(tk_vals), max(triton_vals), max(ck_vals))
 
     # Create bar chart
     x = np.arange(len(matrix_sizes))
-    width = 0.145
+    width = 0.19
 
-    fig, ax = plt.subplots(figsize=(15, 6))
+    fig, ax = plt.subplots(figsize=(10, 6))
     first_bar = x - 3*width
     second_bar = x - 2*width
     third_bar = x - width
     fourth_bar = x
     fifth_bar = x + width
     sixth_bar = x + 2*width
-    bars0 = ax.bar(first_bar, pytorch_vals, width, label='PyTorch', color=colors[4])
-    bars1 = ax.bar(fifth_bar, aiter_vals, width, label='AITER (AMD)', color=colors[0])
-    bars2 = ax.bar(fourth_bar, hipblaslt_vals, width, label='HipblasLT', color=colors[5])
-    bars3 = ax.bar(sixth_bar, tk_vals, width, label='HipKittens', color=colors[3])
-    bars4 = ax.bar(second_bar, triton_vals, width, label='Triton', color=colors[2])
-    bars5 = ax.bar(third_bar, ck_vals, width, label='Composable Kernel', color=colors[1])
+    # bars0 = ax.bar(first_bar, pytorch_vals, width, label='PyTorch', color=colors[4])
+    bars1 = ax.bar(fourth_bar, aiter_vals, width, label='AITER (AMD)', color=colors[0])
+    bars2 = ax.bar(third_bar, hipblaslt_vals, width, label='HipblasLT', color=colors[1])
+    bars3 = ax.bar(fifth_bar, tk_vals, width, label='HipKittens', color=colors[3])
+    bars4 = ax.bar(first_bar, triton_vals, width, label='Triton', color=colors[2])
+    bars5 = ax.bar(second_bar, ck_vals, width, label='Composable Kernel', color=colors[4])
 
+
+    fontsize = 10
+    
     # Plot X markers for OOM
     oom_height = max_tflops * 0.95
 
-    for idx in pytorch_oom:
-        ax.plot(x[idx] - 3*width, oom_height, 'x', color=colors[0], markersize=15, markeredgewidth=3)
-        ax.text(x[idx] - 3*width, oom_height + max_tflops * 0.03, 'OOM', ha='center', va='bottom', fontsize=10, color=colors[0])
+    # for idx in pytorch_oom:
+    #     ax.plot(x[idx] - 3*width, oom_height, 'x', color=colors[0], markersize=15, markeredgewidth=3)
+    #     ax.text(x[idx] - 3*width, oom_height + max_tflops * 0.03, 'OOM', ha='center', va='bottom', fontsize=10, color=colors[0])
 
     for idx in aiter_oom:
         ax.plot(x[idx] - 2*width, oom_height, 'x', color=colors[1], markersize=15, markeredgewidth=3)
-        ax.text(x[idx] - 2*width, oom_height + max_tflops * 0.03, 'OOM', ha='center', va='bottom', fontsize=10, color=colors[1])
+        ax.text(x[idx] - 2*width, oom_height + max_tflops * 0.03, 'OOM', ha='center', va='bottom', fontsize=fontsize, color=colors[1])
 
     for idx in hipblaslt_oom:
         ax.plot(x[idx] - width, oom_height, 'x', color=colors[2], markersize=15, markeredgewidth=3)
-        ax.text(x[idx] - width, oom_height + max_tflops * 0.03, 'OOM', ha='center', va='bottom', fontsize=10, color=colors[2])
+        ax.text(x[idx] - width, oom_height + max_tflops * 0.03, 'OOM', ha='center', va='bottom', fontsize=fontsize, color=colors[2])
 
     for idx in tk_oom:
         ax.plot(x[idx], oom_height, 'x', color=colors[3], markersize=15, markeredgewidth=3)
-        ax.text(x[idx], oom_height + max_tflops * 0.03, 'OOM', ha='center', va='bottom', fontsize=10, color=colors[3])
+        ax.text(x[idx], oom_height + max_tflops * 0.03, 'OOM', ha='center', va='bottom', fontsize=fontsize, color=colors[3])
 
     for idx in triton_oom:
         ax.plot(x[idx] + width, oom_height, 'x', color=colors[4], markersize=15, markeredgewidth=3)
-        ax.text(x[idx] + width, oom_height + max_tflops * 0.03, 'OOM', ha='center', va='bottom', fontsize=10, color=colors[4])
+        ax.text(x[idx] + width, oom_height + max_tflops * 0.03, 'OOM', ha='center', va='bottom', fontsize=fontsize, color=colors[4])
 
     for idx in ck_oom:
         ax.plot(x[idx] + 2*width, oom_height, 'x', color=colors[5], markersize=15, markeredgewidth=3)
-        ax.text(x[idx] + 2*width, oom_height + max_tflops * 0.03, 'OOM', ha='center', va='bottom', fontsize=10, color=colors[5])
+        ax.text(x[idx] + 2*width, oom_height + max_tflops * 0.03, 'OOM', ha='center', va='bottom', fontsize=fontsize, color=colors[5])
 
     # Add value labels on bars
-    for bar, value in zip(bars0, pytorch_vals):
-        if value > 0:
-            height = bar.get_height()
-            ax.text(bar.get_x() + bar.get_width()/2., height + max_tflops * 0.01,
-                    f'{value:.0f}', ha='center', va='bottom', fontsize=10)
+        # for bar, value in zip(bars0, pytorch_vals):
+        #     if value > 0:
+        #         height = bar.get_height()
+        #         ax.text(bar.get_x() + bar.get_width()/2., height + max_tflops * 0.01,
+        #                 f'{value:.0f}', ha='center', va='bottom', fontsize=10)
 
     for bar, value in zip(bars1, aiter_vals):
         if value > 0:
@@ -210,7 +213,7 @@ for device in ['mi300x', 'mi325x', 'mi350x', 'mi355x']:
 
     # Print summary
     print(f"Matrix sizes tested: {matrix_sizes}")
-    print(f"PyTorch TFLOPS: {[f'{t:.2f}' if t > 0 else 'OOM' for t in pytorch_vals]}")
+    # print(f"PyTorch TFLOPS: {[f'{t:.2f}' if t > 0 else 'OOM' for t in pytorch_vals]}")
     print(f"AITER (AMD) TFLOPS: {[f'{t:.2f}' if t > 0 else 'OOM' for t in aiter_vals]}")
     print(f"HipblasLT TFLOPS: {[f'{t:.2f}' if t > 0 else 'OOM' for t in hipblaslt_vals]}")
     print(f"HipKittens TFLOPS: {[f'{t:.2f}' if t > 0 else 'OOM' for t in tk_vals]}")

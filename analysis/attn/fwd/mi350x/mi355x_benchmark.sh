@@ -1,7 +1,7 @@
 # # GQA (non-causal)
 
-make TARGET=tk_kernel SRC=gqa_kernel_1024.cpp
-python test_python.py 1024 64 8 0 mi355x_gqa_non_causal_fwd.json
+# make TARGET=tk_kernel SRC=gqa_kernel_1024.cpp
+# python test_python.py 1024 64 8 0 mi355x_gqa_non_causal_fwd.json
 
 # make TARGET=tk_kernel SRC=gqa_kernel_2048.cpp
 # python test_python.py 2048 64 8 0 mi355x_gqa_non_causal_fwd.json
@@ -35,17 +35,17 @@ python test_python.py 1024 64 8 0 mi355x_gqa_non_causal_fwd.json
 
 # # GQA (causal)
 
-# make TARGET=tk_kernel SRC=causal_gqa_kernel_1024.cpp
-# python test_python.py 1024 64 8 1 mi355x_gqa_causal_fwd.json
+make TARGET=tk_kernel SRC=causal_gqa_kernel_1024.cpp
+python test_python.py 1024 64 8 1 mi355x_gqa_causal_fwd.json
 
-# make TARGET=tk_kernel SRC=causal_gqa_kernel_2048.cpp
-# python test_python.py 2048 64 8 1 mi355x_gqa_causal_fwd.json
+make TARGET=tk_kernel SRC=causal_gqa_kernel_2048.cpp
+python test_python.py 2048 64 8 1 mi355x_gqa_causal_fwd.json
 
-# make TARGET=tk_kernel SRC=causal_gqa_kernel_4096.cpp
-# python test_python.py 4096 64 8 1 mi355x_gqa_causal_fwd.json
+make TARGET=tk_kernel SRC=causal_gqa_kernel_4096.cpp
+python test_python.py 4096 64 8 1 mi355x_gqa_causal_fwd.json
 
-# make TARGET=tk_kernel SRC=causal_gqa_kernel_8192.cpp
-# python test_python.py 8192 64 8 1 mi355x_gqa_causal_fwd.json
+make TARGET=tk_kernel SRC=causal_gqa_kernel_8192.cpp
+python test_python.py 8192 64 8 1 mi355x_gqa_causal_fwd.json
 
 # make TARGET=tk_kernel SRC=causal_gqa_kernel_16384.cpp
 # python test_python.py 16384 64 8 1 mi355x_gqa_causal_fwd.json
