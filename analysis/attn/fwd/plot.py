@@ -6,11 +6,11 @@ import numpy as np
 # B = 16, H = 64, HK8, D = 128.
 mi355x_gqa_baselines_causal = {
     "triton": {
-        "1024": 456,
-        "2048": 569,
-        "4096": 614,
-        "8192": 764,
-        "16384": 848,
+        "1024": 156.883795,
+        "2048": 248.866051,
+        "4096": 367.821190,
+        "8192": 593.577963,
+        "16384": 793.799216,
     },
     "ck": {
         "1024": 596.53,
@@ -20,22 +20,22 @@ mi355x_gqa_baselines_causal = {
         "16384": 878.86,
     },
     "torch": {
-        "1024": 14,
-        "2048": 15,
-        "4096": 15,
-        "8192": "OOM",
-        "16384": "OOM",
+        "1024": 158.805348,
+        "2048": 353.431751,
+        "4096": 499.219058,
+        "8192": 705.247090,
+        "16384": 789.283990,
     }
 }
 
 # B = 16, H = 64, HK8, D = 128.
 mi350x_gqa_baselines_causal = {
     "triton": {
-        "1024": 398.220437,
-        "2048": 462.552210,
-        "4096": 488.052800,
-        "8192": 618.134744,
-        "16384": 691.502584,
+        "1024": 345.033065,
+        "2048": 406.719134,
+        "4096": 466.954389,
+        "8192": 585.368131,
+        "16384": 661.953230,
     },
     "ck": {
         "1024": 461,
@@ -45,28 +45,21 @@ mi350x_gqa_baselines_causal = {
         "16384": 677,
     },
     "torch": {
-        "1024": 12.668953,
-        "2048": 13.742200,
-        "4096": 14.442294,
-        "8192": "OOM",
-        "16384": "OOM",
+        "1024": 229.270408,
+        "2048": 348.623688,
+        "4096": 435.442672,
+        "8192": 563.473710,
+        "16384": 616.830358,
     },
-    "aiter": {
-        "1024": 567.01,
-        "2048": 782.79,
-        "4096": 844.96,
-        "8192": 915.63,
-        "16384": 968.90,
-    }
 }
 
 mi355x_gqa_baselines_non_causal = {
     "triton": {
-        "1024": 844,
-        "2048": 945,
-        "4096": 996,
-        "8192": 1005,
-        "16384":1011,
+        "1024": 827.544143,
+        "2048": 905.804361,
+        "4096": 967.666252,
+        "8192": 993.507993,
+        "16384":989.718846,
     },
     "ck": {
         "1024": 799,
@@ -76,21 +69,21 @@ mi355x_gqa_baselines_non_causal = {
         "16384": 901,
     },
     "torch": {
-        "1024": 29,
-        "2048": 31,
-        "4096": 34,
-        "8192": "OOM",
-        "16384": "OOM",
+        "1024": 468.169993,
+        "2048": 625.294982,
+        "4096": 610.161908,
+        "8192": 841.134461,
+        "16384": 878.907987,
     }
 }
 
-mi350x_gqa_baselines_causal = {
+mi350x_gqa_baselines_non_causal = {
     "triton": {
-        "1024": 661.689624,
-        "2048": 736.288587,
-        "4096": 777.730750,
-        "8192": 806.935961,
-        "16384":811.201966,
+        "1024": 644.577453,
+        "2048": 720.468896,
+        "4096": 759.876219,
+        "8192":  788.705964,
+        "16384": 796.414306,
     },
     "ck": {
         "1024": 611,
@@ -100,61 +93,28 @@ mi350x_gqa_baselines_causal = {
         "16384": 691,
     },
     "torch": {
-        "1024": 26.912733,
-        "2048": 29.571504,
-        "4096": 31.270997,
-        "8192": "OOM",
-        "16384": "OOM",
+        "1024": 389.920113,
+        "2048": 498.827797,
+        "4096": 507.743586,
+        "8192": 653.224327,
+        "16384": 682.364236,
     },
-    "aiter": {
-        "1024": 818.35,
-        "2048": 967.91,
-        "4096": 968.28,
-        "8192": 983.25,
-        "16384": 1009.18,
-    }
 }
 
-mi350x_gqa_baselines_non_causal = {
-    "triton": {
-        "1024": 398.220437,
-        "2048": 462.552210,
-        "4096": 488.052800,
-        "8192": 618.134744,
-        "16384": 691.502584,
-    },
-    "ck": {
-        "1024": 461,
-        "2048": 557,
-        "4096": 627,
-        "8192": 654,
-        "16384": 677,
-    },
-    "torch": {
-        "1024": 12.668953,
-        "2048": 13.742200,
-        "4096": 14.442294,
-        "8192": "OOM",
-        "16384": "OOM",
-    },
-    "aiter": {
-        "1024": 567.01,
-        "2048": 782.79,
-        "4096": 844.96,
-        "8192": 915.63,
-        "16384": 968.90,
-    }
-}
+
+#**************************************#
+#**************************************#
+#**************************************#
 
 
 # B = 16, H = 16, D = 128.
 mi355x_mha_baselines_causal = {
     "triton": {
-        "1024": 371,
-        "2048": 508,
-        "4096": 573,
-        "8192": 733,
-        "16384": 845,
+        "1024": 333.074017,
+        "2048": 435.433397,
+        "4096": 481.786402,
+        "8192": 653.114342,
+        "16384": 749.760119,
     },
     "ck": {
         "1024": 485,
@@ -164,22 +124,22 @@ mi355x_mha_baselines_causal = {
         "16384": 893,
     },
     "torch": {
-        "1024": 13,
-        "2048": 14,
-        "4096": 15,
-        "8192": 15,
-        "16384": "OOM",
+        "1024": 54.832384,
+        "2048": 246.376588,
+        "4096": 421.775249,
+        "8192": 630.386987,
+        "16384": 761.564515,
     }
 }
 
 # B = 16, H = 16, D = 128.
 mi350x_mha_baselines_causal = {
     "triton": {
-        "1024": 314.211205,
-        "2048": 424.128758,
-        "4096": 473.762229,
-        "8192": 593.775992,
-        "16384": 654.668156,
+        "1024": 300.997420,
+        "2048": 379.020376,
+        "4096": 428.671623,
+        "8192": 548.290901,
+        "16384": 636.744268,
     },
     "ck": {
         "1024": 412,
@@ -189,29 +149,22 @@ mi350x_mha_baselines_causal = {
         "16384": 700,
     },
     "torch": {
-        "1024": 12.70,
-        "2048": 13.45,
-        "4096": 14.26,
-        "8192": 13.84,
-        "16384": "OOM",
+        "1024": 206.342435,
+        "2048": 330.937919,
+        "4096": 418.252342,
+        "8192": 545.178486,
+        "16384": 605.932610,
     },
-    "aiter": {
-        "1024": 392.17,
-        "2048": 698.19,
-        "4096": 953.31,
-        "8192": 909.30,
-        "16384": 952.64,
-    }
 }
 
 # B = 16, H = 16, D = 128.
 mi355x_mha_baselines_non_causal = {
     "triton": {
-        "1024": 694,
-        "2048": 855,
-        "4096": 944,
-        "8192": 1001,
-        "16384": 1011,
+        "1024": 686.733941,
+        "2048": 839.167226,
+        "4096": 923.082293,
+        "8192": 973.608837,
+        "16384": 987.687075,
     },
     "ck": {
         "1024": 761,
@@ -221,21 +174,21 @@ mi355x_mha_baselines_non_causal = {
         "16384": 914,
     },
     "torch": {
-        "1024": 29,
-        "2048": 32,
-        "4096": 34,
-        "8192": 33,
-        "16384": "OOM",
+        "1024": 452.941180,
+        "2048": 579.431411,
+        "4096": 593.913331,
+        "8192": 821.786381,
+        "16384": 872.787694,
     }
 }
 
 mi350x_mha_baselines_non_causal = {
     "triton": {
-        "1024": 314.211205,
-        "2048": 424.128758,
-        "4096": 473.762229,
-        "8192": 593.775992,
-        "16384": 654.668156,
+        "1024": 540.009854,
+        "2048": 653.904298,
+        "4096": 720.141781,
+        "8192": 762.681248,
+        "16384": 783.453667,
     },
     "ck": {
         "1024": 412,
@@ -245,51 +198,14 @@ mi350x_mha_baselines_non_causal = {
         "16384": 700,
     },
     "torch": {
-        "1024": 12.70,
-        "2048": 13.45,
-        "4096": 14.26,
-        "8192": 13.84,
-        "16384": "OOM",
+        "1024": 391.910339,
+        "2048": 487.032741,
+        "4096": 510.344030,
+        "8192": 645.407375,
+        "16384": 677.062160,
     },
-    "aiter": {
-        "1024": 392.17,
-        "2048": 698.19,
-        "4096": 953.31,
-        "8192": 909.30,
-        "16384": 952.64,
-    }
 }
 
-mi350x_mha_baselines_causal = {
-    "triton": {
-        "1024": 554.682706,
-        "2048": 667.633763,
-        "4096": 736.837676,
-        "8192": 775.493057,
-        "16384": 802.799758,
-    },
-    "ck": {
-        "1024": 591,
-        "2048": 603,
-        "4096": 665,
-        "8192": 700,
-        "16384": 715,
-    },
-    "torch": {
-        "1024": 26.98,
-        "2048": 29.24,
-        "4096": 30.99,
-        "8192": 30.72,
-        "16384": "OOM",
-    },
-    "aiter": {
-        "1024": 570.79,
-        "2048": 896.85,
-        "4096": 976.44,
-        "8192": 956.59,
-        "16384": 974.80,
-    }
-}
 
 colors = ["#8E69B8", "#E59952", "#68AC5A", "#7CB9BC", "#DE836B"]
 
@@ -378,9 +294,9 @@ for device in ['mi300x', 'mi325x', 'mi350x', 'mi355x']:
 
         # Create bar chart
         x = np.arange(len(matrix_sizes))
-        width = 0.17
+        width = 0.19
 
-        fig, ax = plt.subplots(figsize=(16, 6))
+        fig, ax = plt.subplots(figsize=(10, 6))
         first_bar_start = x - 2*width
         second_bar_start = x - width
         third_bar_start = x
@@ -389,49 +305,51 @@ for device in ['mi300x', 'mi325x', 'mi350x', 'mi355x']:
         bars0 = ax.bar(fourth_bar_start, aiter_tflops, width, label='AITER', color=colors[0])
         bars1 = ax.bar(fifth_bar_start, tk_tflops, width, label='HipKittens', color=colors[3])
         bars2 = ax.bar(second_bar_start, triton_vals, width, label='Triton', color=colors[2])
-        bars3 = ax.bar(first_bar_start, torch_vals, width, label='PyTorch SDPA', color=colors[4])
-        bars4 = ax.bar(third_bar_start, ck_vals, width, label='Composable Kernel', color=colors[1])
+        bars3 = ax.bar(first_bar_start, torch_vals, width, label='PyTorch SDPA', color=colors[1])
+        bars4 = ax.bar(third_bar_start, ck_vals, width, label='Composable Kernel', color=colors[4])
 
+
+        fontsize = 11
         # Plot X markers for OOM
-        oom_height = 50  # Position X near top of chart
+        oom_height = 35  # Position X near top of chart
         if torch_oom:
             for idx in torch_oom:
-                ax.plot(x[idx] -  2*width, oom_height, 'x', color=colors[4], 
-                       markersize=15, markeredgewidth=3)
+                ax.plot(x[idx] -  2*width, oom_height, 'x', color=colors[1], 
+                       markersize=13, markeredgewidth=3)
                 ax.text(x[idx] -  2*width, oom_height + max_tflops * 0.03,
-                       'OOM', ha='center', va='bottom', fontsize=10, color=colors[4])
+                       'OOM', ha='center', va='bottom', fontsize=9, color=colors[1])
 
         # Add value labels on bars
         for bar, value in zip(bars0, aiter_tflops):
             height = bar.get_height()
             ax.text(bar.get_x() + bar.get_width()/2., height + max_tflops * 0.01,
-                    f'{value:.0f}', ha='center', va='bottom', fontsize=14)
+                    f'{value:.0f}', ha='center', va='bottom', fontsize=fontsize)
 
         for bar, value in zip(bars1, tk_tflops):
             height = bar.get_height()
             ax.text(bar.get_x() + bar.get_width()/2., height + max_tflops * 0.01,
-                    f'{value:.0f}', ha='center', va='bottom', fontsize=14)
+                    f'{value:.0f}', ha='center', va='bottom', fontsize=fontsize)
 
         if len(triton_vals) > 0:
             for bar, value in zip(bars2, triton_vals):
                 if value > 0:  # Only label non-OOM bars
                     height = bar.get_height()
                     ax.text(bar.get_x() + bar.get_width()/2., height + max_tflops * 0.01,
-                            f'{value:.0f}', ha='center', va='bottom', fontsize=14)
+                            f'{value:.0f}', ha='center', va='bottom', fontsize=fontsize)
         
         if len(torch_vals) > 0:
             for i, (bar, value) in enumerate(zip(bars3, torch_vals)):
                 if value > 0:  # Only label non-OOM bars
                     height = bar.get_height()
                     ax.text(bar.get_x() + bar.get_width()/2., height + max_tflops * 0.01,
-                            f'{value:.0f}', ha='center', va='bottom', fontsize=14)
+                            f'{value:.0f}', ha='center', va='bottom', fontsize=fontsize)
                         
         if len(ck_vals) > 0:
             for bar, value in zip(bars4, ck_vals):
                 if value > 0:  # Only label non-OOM bars
                     height = bar.get_height()
                     ax.text(bar.get_x() + bar.get_width()/2., height + max_tflops * 0.01,
-                            f'{value:.0f}', ha='center', va='bottom', fontsize=14)
+                            f'{value:.0f}', ha='center', va='bottom', fontsize=fontsize)
 
         # Parse setting name for title
         setting_parts = setting.split('_')
@@ -440,13 +358,13 @@ for device in ['mi300x', 'mi325x', 'mi350x', 'mi355x']:
 
         # add some padding to the top of the y-axis to prevent label overlap
         ax.set_ylim(0, max_tflops * 1.15)
-        ax.set_xlabel('Sequence Length (N)', fontsize=16)
+        ax.set_xlabel('Sequence Length', fontsize=16)
         ax.set_ylabel('Performance (TFLOPS)', fontsize=16)
         ax.set_title(f'{attn_type} {causal_mode} Forward Performance Comparison {device.upper()}', fontsize=16)
         ax.set_xticks(x)
         ax.set_xticklabels(matrix_sizes, fontsize=16)
         ax.tick_params(axis='y', labelsize=16)
-        ax.legend(fontsize=16)
+        ax.legend(fontsize=14)
 
         plt.tight_layout()
         plt.show()

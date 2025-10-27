@@ -46,6 +46,7 @@ template<int D, typename T=float, typename L=col_l, typename S=rt_16x32_4_s> usi
 template<int D> struct attn_globals { 
     _gl_QKVO Qg, Kg, Vg, Og; 
     gl<float, -1, -1, -1, -1> L_vec;
+    hipStream_t stream;
     dim3 grid() { return dim3(ATTN_H, ((ATTN_N / Q_BLOCK_SIZE + NUM_WARPS - 1) / NUM_WARPS), ATTN_B); }
     dim3 block() { return dim3(NUM_THREADS); }
     size_t dynamic_shared_memory() { return MAX_SHARED_MEMORY; }
@@ -452,8 +453,8 @@ template<int D>
 void dispatch_micro(attn_globals<D> g) {
     unsigned long mem_size = g.dynamic_shared_memory();
     hipFuncSetAttribute((void*)attend_ker<D>, hipFuncAttributeMaxDynamicSharedMemorySize, mem_size);
-    attend_ker<D><<<g.grid(), g.block(), mem_size>>>(g);
-    hipDeviceSynchronize();
+    attend_ker<D><<<g.grid(), g.block(), mem_size, g.stream>>>(g);
+    // hipDeviceSynchronize();
 }
 
 PYBIND11_MODULE(tk_kernel, m) {

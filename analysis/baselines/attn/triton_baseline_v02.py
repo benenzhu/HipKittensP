@@ -1656,13 +1656,13 @@ def nonvarlen_benchmark_configs():
         (16, 16, 16, 2048, 2048),
         (16, 16, 16, 4096, 4096),
         (16, 16, 16, 8192, 8192),
-        # (16, 16, 16, 16384, 16384), # OOM 
+        (16, 16, 16, 16384, 16384), # OOM 
 
         (16, 64, 8, 1024, 1024),
         (16, 64, 8, 2048, 2048),
         (16, 64, 8, 4096, 4096),
-        # (16, 64, 8, 8192, 8192),
-        # (16, 64, 8, 16384, 16384),
+        (16, 64, 8, 8192, 8192),
+        (16, 64, 8, 16384, 16384),
         
     ]
     return configs
@@ -1674,7 +1674,7 @@ def run_benchmark(custom, args):
     hk = args.hq if not args.hk else args.hk
     sk = args.sq if not args.sk else args.sk
     head_size = 128 if not args.d else args.d
-    mode = 'bwd'
+    mode = 'fwd'
     x_names = ['BATCH', 'HQ', 'HK', 'N_CTX_Q', 'N_CTX_K']
     causal = False # args.causal if not args.model else True
     int8 = args.int8
@@ -1702,7 +1702,7 @@ def run_benchmark(custom, args):
             x_vals_list = new_x
 
     print_time = args.return_time
-    line_vals = ['torch'] #, 'torch']  # 'Time (ms)' if print_time else 'TFLOPS'
+    line_vals = ['torch', 'triton'] 
     configs.append(
         triton.testing.Benchmark(x_names=x_names, x_vals=x_vals_list, line_arg='provider', line_vals=line_vals,
                                  line_names=line_vals, styles=[('green', '-'), ('red', '-')],

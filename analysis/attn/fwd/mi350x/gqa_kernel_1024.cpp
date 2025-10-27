@@ -150,7 +150,7 @@ __global__ void attend_ker(const attn_globals<D> g) {
     __builtin_amdgcn_s_barrier();
 
     // hot loop
-    // #pragma unroll  // for some reason unroll makes it slower
+    #pragma unroll  2 
     for (int j = 3; j < num_tiles - 1; j += 2) {
         // Cluster 0:
         //      QK1

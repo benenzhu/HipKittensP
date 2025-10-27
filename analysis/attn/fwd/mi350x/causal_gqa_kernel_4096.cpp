@@ -283,12 +283,12 @@ __global__ void attend_ker(const attn_globals<D> g) {
         G::load<1, false>(k_smem[1], g.Kg, {batch_idx, j, head_idx_kv, 0}, swizzled_offsets_K);
         //      Load V0 into registers
         load(v_reg, v_smem[0]);
-        if constexpr (causal) {
-            const int kv_end_pos = (j - 1) * KV_BLOCK_SIZE;
-            if (__builtin_expect(q_start_pos < kv_end_pos, 0)) {  // Only mask if needed
-                mask_kv_tile(att_block[1], tile_idx, j - 2, neg_inf_v, lane);
-            }
-        }
+        // if constexpr (causal) {
+        //     const int kv_end_pos = (j - 1) * KV_BLOCK_SIZE;
+        //     if (__builtin_expect(q_start_pos < kv_end_pos, 0)) {  // Only mask if needed
+        //         mask_kv_tile(att_block[1], tile_idx, j - 2, neg_inf_v, lane);
+        //     }
+        // }
         asm volatile("s_waitcnt lgkmcnt(0)");
         asm volatile("s_waitcnt vmcnt(4)");
         __builtin_amdgcn_sched_barrier(0);
@@ -892,6 +892,12 @@ __global__ void attend_ker(const attn_globals<D> g) {
     G::load<1, false>(k_smem[1], g.Kg, {batch_idx, max_num_tiles - 1, head_idx_kv, 0}, swizzled_offsets_K);
     //      Load V2 into registers
     load(v_reg, v_smem[0]);
+    if constexpr (causal) {
+        const int kv_end_pos = (max_num_tiles - 2) * KV_BLOCK_SIZE;
+        if (__builtin_expect(q_start_pos < kv_end_pos, 0)) {  // Only mask if needed
+            mask_kv_tile(att_block[1], tile_idx, max_num_tiles - 3, neg_inf_v, lane);
+        }
+    }
     asm volatile("s_waitcnt lgkmcnt(0)");
     asm volatile("s_waitcnt vmcnt(4)");
     __builtin_amdgcn_sched_barrier(0);
@@ -909,14 +915,6 @@ __global__ void attend_ker(const attn_globals<D> g) {
         mma_AtB_base(o_reg.tiles[0][0], v_reg.tiles[3][0], att_block_bf16_in.tiles[3][0], o_reg.tiles[0][0]);
         mma_AtB_base(o_reg.tiles[1][0], v_reg.tiles[0][1], att_block_bf16_in.tiles[0][0], o_reg.tiles[1][0]);
     }
-    __builtin_amdgcn_sched_barrier(0);
-    if constexpr (causal) {
-        const int kv_end_pos = (max_num_tiles - 2) * KV_BLOCK_SIZE;
-        if (__builtin_expect(q_start_pos < kv_end_pos, 0)) {  // Only mask if needed
-            mask_kv_tile(att_block[1], tile_idx, max_num_tiles - 3, neg_inf_v, lane);
-        }
-    }
-    __builtin_amdgcn_sched_barrier(0);
     //      Partial softmax for QK3
     col_max(max_vec, att_block[1], max_vec_prev);
     sub(scale_vec, max_vec_prev, max_vec);
@@ -1194,6 +1192,12 @@ __global__ void attend_ker(const attn_globals<D> g) {
     // Cluster 5:
     //      Load V3 into registers
     load(v_reg, v_smem[1]);
+    if constexpr (causal) {
+        const int kv_end_pos = (max_num_tiles - 1) * KV_BLOCK_SIZE;
+        if (__builtin_expect(q_start_pos < kv_end_pos, 1)) {  // Only mask if needed
+            mask_kv_tile(att_block[0], tile_idx, max_num_tiles - 2, neg_inf_v, lane);
+        }
+    }
     asm volatile("s_waitcnt lgkmcnt(0)");
     asm volatile("s_waitcnt vmcnt(2)");
     __builtin_amdgcn_sched_barrier(0);
@@ -1211,14 +1215,6 @@ __global__ void attend_ker(const attn_globals<D> g) {
         mma_AtB_base(o_reg.tiles[0][0], v_reg.tiles[3][0], att_block_bf16_in.tiles[3][0], o_reg.tiles[0][0]);
         mma_AtB_base(o_reg.tiles[1][0], v_reg.tiles[0][1], att_block_bf16_in.tiles[0][0], o_reg.tiles[1][0]);
     }
-    __builtin_amdgcn_sched_barrier(0);
-    if constexpr (causal) {
-        const int kv_end_pos = (max_num_tiles - 1) * KV_BLOCK_SIZE;
-        if (__builtin_expect(q_start_pos < kv_end_pos, 1)) {  // Only mask if needed
-            mask_kv_tile(att_block[0], tile_idx, max_num_tiles - 2, neg_inf_v, lane);
-        }
-    }
-    __builtin_amdgcn_sched_barrier(0);
     //      Partial softmax for QK4
     col_max(max_vec, att_block[0], max_vec_prev);
     sub(scale_vec, max_vec_prev, max_vec);
@@ -1495,6 +1491,12 @@ __global__ void attend_ker(const attn_globals<D> g) {
     // Cluster 9:
     //      Load V4 into registers
     load(v_reg, v_smem[0]);
+    if constexpr (causal) {
+        const int kv_end_pos = (max_num_tiles) * KV_BLOCK_SIZE;
+        if (__builtin_expect(q_start_pos < kv_end_pos, 1)) {  // Only mask if needed
+            mask_kv_tile(att_block[1], tile_idx, max_num_tiles - 1, neg_inf_v, lane);
+        }
+    }
     asm volatile("s_waitcnt lgkmcnt(0)");
     asm volatile("s_waitcnt vmcnt(0)");
     __builtin_amdgcn_sched_barrier(0);
@@ -1505,14 +1507,6 @@ __global__ void attend_ker(const attn_globals<D> g) {
     //      A4V4
     mma_AtB(o_reg, v_reg, att_block_bf16_in, o_reg);
     //      Full softmax for QK5
-    __builtin_amdgcn_sched_barrier(0);
-    if constexpr (causal) {
-        const int kv_end_pos = (max_num_tiles) * KV_BLOCK_SIZE;
-        if (__builtin_expect(q_start_pos < kv_end_pos, 1)) {  // Only mask if needed
-            mask_kv_tile(att_block[1], tile_idx, max_num_tiles - 1, neg_inf_v, lane);
-        }
-    }
-    __builtin_amdgcn_sched_barrier(0);
     col_max(max_vec, att_block[1], max_vec_prev);
     sub(scale_vec, max_vec_prev, max_vec);
     copy(max_vec_prev, max_vec);
@@ -1566,16 +1560,16 @@ __global__ void attend_ker(const attn_globals<D> g) {
 }
 
 template<int D>
-void dispatch_fwd(attn_globals<D> g) {
+void dispatch_micro(attn_globals<D> g) {
     unsigned long mem_size = g.dynamic_shared_memory();
     hipFuncSetAttribute((void*)attend_ker<D>, hipFuncAttributeMaxDynamicSharedMemorySize, mem_size);
     attend_ker<D><<<g.grid(), g.block(), mem_size, g.stream>>>(g);
-    hipDeviceSynchronize();
+    // hipDeviceSynchronize();
 }
 
-PYBIND11_MODULE(tk_fwd_causal_kernel, m) {
+PYBIND11_MODULE(tk_kernel, m) {
     m.doc() = "tk_kernel python module";
-    py::bind_function<dispatch_fwd<ATTN_D>>(m, "dispatch_fwd", 
+    py::bind_function<dispatch_micro<ATTN_D>>(m, "dispatch_micro", 
         &attn_globals<ATTN_D>::Qg, 
         &attn_globals<ATTN_D>::Kg, 
         &attn_globals<ATTN_D>::Vg, 
