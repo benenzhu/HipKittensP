@@ -186,24 +186,26 @@ __device__ inline void load(ST& dst, const GL& src, const COORD& idx, const uint
 
     constexpr int bytes_per_thread = ST::underlying_subtile_bytes_per_thread;
     constexpr int bytes_per_warp = bytes_per_thread * kittens::WARP_THREADS;
+    constexpr int elements_per_warp = bytes_per_warp / sizeof(T);
     constexpr int memcpy_per_tile = ST::rows * ST::cols * sizeof(T) / (bytes_per_thread * N_THREADS);
     static_assert(ST::rows * ST::cols * sizeof(T) >= bytes_per_warp, "shared tile must be at least 1024 bytes");
     
     constexpr int num_warps = N_THREADS / kittens::WARP_THREADS;
     const int laneid = kittens::laneid();
-    const int warpid = kittens::warpid() % num_warps;
+    const int warpid = kittens::warpid();
 
     const int row_stride = src.template stride<axis>();
     coord<> unit_coord = idx.template unit_coord<axis, 3>();
     T* global_ptr = (T*)&src[unit_coord];
     i32x4 srsrc = make_srsrc(global_ptr, row_stride * ST::rows * sizeof(T));
 
-    const uintptr_t lds_base = reinterpret_cast<uintptr_t>(&dst.data[0]) + (warpid * bytes_per_warp);
+    const T* lds_base = &dst.data[0] + (warpid * elements_per_warp);
 
     #pragma unroll
     for (int i = 0; i < memcpy_per_tile; i++) {
 
-        const uintptr_t lds_addr = lds_base + (i * num_warps * bytes_per_warp);
+        const T* lds_elem_ptr = lds_base + (i * num_warps * elements_per_warp);
+        uintptr_t lds_addr = reinterpret_cast<uintptr_t>(lds_elem_ptr);
         as3_uint32_ptr lds_ptr = (as3_uint32_ptr)(lds_addr);
 
         llvm_amdgcn_raw_buffer_load_lds(
