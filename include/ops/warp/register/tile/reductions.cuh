@@ -206,16 +206,22 @@ __device__ static inline void col_reduce(V &col_accum, const T &src, const V &sr
             }
         }
 
+        if constexpr (reset) {
+            #pragma unroll
+            for(int k = 0; k < packed_per_tile; k++) {
+                col_accum[j][k] = accum[k];
+            }
+        }
+        else {
+            #pragma unroll
+            for(int k = 0; k < packed_per_tile; k++) {
+                col_accum[j][k] = op::template op<RT2>(src_accum[j][k], accum[k]);
+            }
+        }
+
         #pragma unroll
         for(int k = 0; k < packed_per_tile; k++) {
-            RT2 result;
-            if constexpr (reset) {
-                result = accum[k];
-            }
-            else {
-                result = op::template op<RT2>(src_accum[j][k], accum[k]);
-            }
-            col_accum[j][k] = packed_shfl(MASK_ALL, result, leader);
+            col_accum[j][k] = packed_shfl(MASK_ALL, col_accum[j][k], leader);
         }
     }
 }

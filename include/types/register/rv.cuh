@@ -45,7 +45,7 @@ struct identifier {};
  * the register layouts used by the tensor cores. ThunderKittens wants you working with tiles
  * where possible!
  */
-template<typename _T, size_t _length, size_t _tile_length, ducks::rv_layout::all _layout=ducks::rv_layout::naive, ducks::rt_shape::all _shape=ducks::rt_shape::rt_16x16>
+template<typename _T, size_t _length, size_t _tile_length, ducks::rt_shape::all _shape, ducks::rv_layout::all _layout=ducks::rv_layout::naive>
 struct rv {
     using identifier = ducks::rv::identifier; ///< Type identifier for the rv structure.
     static_assert(kittens::ducks::base_types::T1<_T>); // confirm it's a supported type
@@ -56,12 +56,12 @@ struct rv {
     using T = kittens::base_types::packing<_T>::unpacked_type;
     using T2 = kittens::base_types::packing<_T>::packed_type;
     using dtype = std::conditional_t<is_naive || is_ortho, T, T2>;
-    static constexpr int packing = kittens::base_types::packing<_T>::num();
+    static constexpr int packing = kittens::base_types::packing<dtype>::num();
 
     static constexpr int length = _length; ///< Length in elements.
     static_assert(length % _tile_length == 0, "Length must be divisible by the tile dimension");
     static constexpr int tiles  = _length / _tile_length; ///< Length in subtiles, aliased for consistency with sv type
-    static constexpr int inner_dim = is_naive ? length / kittens::WARP_THREADS : (is_ortho ? 1 : shape::elements_per_thread / packing);
+    static constexpr int inner_dim = is_naive ? length / kittens::WARP_THREADS : (is_ortho ? 1 : _shape::elements_per_thread / packing);
     static constexpr int outer_dim = is_naive ? 1 : tiles;
 
     // For align layout

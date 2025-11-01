@@ -86,8 +86,8 @@ struct rt {
 
     rt_base<T, layout, shape> tiles[height][width]; ///< The actual storage for the matrix tile, organized in subtiles.
 
-    using row_vec = rv<T, cols, base_tile_cols, typename rt_base<T, layout, shape>::row_vec_layout>; ///< A type representing a column vector for this tile.
-    using col_vec = rv<T, rows, base_tile_rows, typename rt_base<T, layout, shape>::col_vec_layout>; ///< A type representing a column vector for this tile.
+    using row_vec = rv<T, cols, base_tile_cols, shape, typename rt_base<T, layout, shape>::row_vec_layout>; ///< A type representing a column vector for this tile.
+    using col_vec = rv<T, rows, base_tile_rows, shape, typename rt_base<T, layout, shape>::col_vec_layout>; ///< A type representing a column vector for this tile.
 };
 
 /* ----------  CONCEPTS  ---------- */

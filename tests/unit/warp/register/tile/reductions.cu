@@ -40,7 +40,7 @@ struct normalize_col {
                 o_ref[i+j*RT_SHAPE::cols*W]  = i_ref[i+j*RT_SHAPE::cols*W];
                 col_sum         += i_ref[i+j*RT_SHAPE::cols*W];
             }
-            for(int j = 0; j < RT_SHAPE::rows*H; j++) o_ref[i+j*RT_SHAPE::cols*W] = col_sum;
+            for(int j = 0; j < RT_SHAPE::rows*H; j++) o_ref[i+j*RT_SHAPE::cols*W] /= col_sum;
         }
     }
     template<typename RT_SHAPE, typename ST_SHAPE, typename dtype, int H, int W, int NW, gl_t GLT, kittens::ducks::rt_layout::all L> __device__ static void device_func(const GLT &input, const GLT &output) {
@@ -52,8 +52,7 @@ struct normalize_col {
         kittens::col_sum(accum, reg_tile);
         __builtin_amdgcn_s_waitcnt(0);
         __builtin_amdgcn_s_barrier();
-        zero(reg_tile);
-        kittens::add_col(reg_tile, reg_tile, accum);
+        kittens::div_col(reg_tile, reg_tile, accum);
         kittens::store(output, reg_tile, {});
     }
 };

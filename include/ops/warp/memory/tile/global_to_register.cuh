@@ -195,6 +195,8 @@ __device__ inline static void store(const GL &dst, const RT &src, const COORD &i
     std::uint64_t  as_u64 = static_cast<std::uint64_t>(as_int);    // widen if host is 32-bit
     buffer_resource br = make_buffer_resource(as_u64, buffer_size, 0x00020000);
 
+    U2 tmp[src.base_tile_stride / packing];
+
     #pragma unroll
     for(int i = 0; i < src.height; i++) {
         int row = src.base_tile_rows*i + row_offset;
@@ -205,8 +207,6 @@ __device__ inline static void store(const GL &dst, const RT &src, const COORD &i
             #pragma unroll
             for(int k = 0; k < src.base_tile_num_strides; k++) {
                 int col = src.base_tile_cols*j + col_offset + k*src.base_tile_elements_per_stride_group;
-
-                U2 tmp[src.base_tile_stride / packing];
                 #pragma unroll
                 for(int l = 0; l < src.base_tile_stride / packing; l++) {
                     int idx = l + k * src.base_tile_stride / packing;

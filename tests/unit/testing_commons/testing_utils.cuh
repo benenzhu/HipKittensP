@@ -143,7 +143,7 @@ void initialize(T **d_i, T **d_o, std::vector<float> &i_ref, std::vector<float> 
 }
 extern int should_write_outputs;
 template<typename T>
-test_result validate(T *d_i, T *d_o, const std::vector<float> &i_ref, std::vector<float> &o_ref, std::string test_name, int cols, float eps=5e-2) { // default eps has to be fairly high due to lots of different types
+test_result validate(T *d_i, T *d_o, const std::vector<float> &i_ref, std::vector<float> &o_ref, std::string test_name, int cols, float atol=1e-2, float rtol=1e-2) { // default eps has to be fairly high due to lots of different types
     using namespace kittens;
     const int input_size  = i_ref.size();
     const int output_size = o_ref.size();
@@ -175,7 +175,7 @@ test_result validate(T *d_i, T *d_o, const std::vector<float> &i_ref, std::vecto
     std::cout << "test `" << test_name << "`";
     bool good = true;
     for(int i = 0; i < output_size; i++) {
-        if(abs(o_ref[i] - o[i]) > eps) {
+        if(abs(o_ref[i] - o[i]) > atol + rtol*abs(o_ref[i])) {
             printf("o_ref[%d]: %f, o[%d]: %f\n", i, o_ref[i], i, o[i]);
             printf("abs(o_ref[%d] - o[%d]): %f\n", i, i, abs(o_ref[i] - o[i]));
             good = false;
