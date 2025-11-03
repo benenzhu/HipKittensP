@@ -1,4 +1,0 @@
-numpy
-pydra_config
-pybind11
-triton==3.3.1
