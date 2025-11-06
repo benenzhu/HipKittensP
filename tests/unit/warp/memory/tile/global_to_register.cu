@@ -3,13 +3,12 @@
 #ifdef TEST_WARP_MEMORY_TILE_GLOBAL_TO_REGISTER
 
 template<typename Ker, typename RT_SHAPE, typename ST_SHAPE, int H, int W, int NW, kittens::ducks::gl::all GL, typename... args>
-static __global__ void g2r_global_wrapper_2d(const GL &input, const GL &output) {
+static __global__ void g2r_global_wrapper_2d(const GL input, const GL output) {
     Ker::template device_func<RT_SHAPE, ST_SHAPE, H, W, NW, GL, args...>(input, output);
 }
 template<typename test, typename RT_SHAPE, typename ST_SHAPE, int H, int W, int NUM_WORKERS, typename... args>
 struct g2r_wrapper_2d {
     using dtype = gmem_dtype<test>; // defaults to bf16 in global memory if the test doesn't specify.
-    using rt_dtype = test::rt_dtype;
     static void run(test_data& results) {
         test_info this_result;
         this_result.label = generate_test_name<RT_SHAPE, ST_SHAPE, H, W, NUM_WORKERS, args...>(test::test_identifier);
@@ -27,15 +26,16 @@ struct g2r_wrapper_2d {
             GL output(d_o, B, nullptr, RT_SHAPE::rows*R*H, nullptr);
             // run kernel
             hipFuncSetAttribute(
-                reinterpret_cast<void *>(global_wrapper_2d<test, RT_SHAPE, ST_SHAPE, H, W, NUM_WORKERS, GL, args...>),
+                reinterpret_cast<void *>(g2r_global_wrapper_2d<test, RT_SHAPE, ST_SHAPE, H, W, NUM_WORKERS, GL, args...>),
                 hipFuncAttributeMaxDynamicSharedMemorySize,
-                kittens::MAX_SHARED_MEMORY
+                kittens::MAX_SHARED_MEMORY / 2
             );
-            global_wrapper_2d<test, RT_SHAPE, ST_SHAPE, H, W, NUM_WORKERS, GL, args...><<<1, NUM_WORKERS*kittens::WARP_THREADS, kittens::MAX_SHARED_MEMORY>>>(input, output);
+
+            g2r_global_wrapper_2d<test, RT_SHAPE, ST_SHAPE, H, W, NUM_WORKERS, GL, args...><<<1, NUM_WORKERS*kittens::WARP_THREADS, kittens::MAX_SHARED_MEMORY / 2>>>(input, output);
             // fill in correct results on cpu
             test::template host_func<RT_SHAPE, ST_SHAPE, H, W, NUM_WORKERS, GL, args...>(i_ref, o_ref);
             // check and cleanup
-            this_result.result = validate(d_i, d_o, i_ref, o_ref, this_result.label, W*RT_SHAPE::cols);
+            this_result.result = validate(d_i, d_o, i_ref, o_ref, this_result.label, C*W*RT_SHAPE::cols);
         }
         else {
             this_result.result = test_result::INVALID;
@@ -47,7 +47,7 @@ template<typename test, typename RT_SHAPE, typename ST_SHAPE, int MAX_H=8, int M
 using g2r_sweep_size_2d = loop_h<g2r_wrapper_2d, test, RT_SHAPE, ST_SHAPE, MAX_H, MAX_W, NUM_WORKERS, MAX_H, args...>;
 template<typename test, typename RT_SHAPE, typename ST_SHAPE, int MAX_H=8, int MAX_W=8, typename... args> using g2r_sweep_size_2d_warp = g2r_sweep_size_2d<test, RT_SHAPE, ST_SHAPE, MAX_H, MAX_W, 1, args...>;
 
-template<typename T, typename RT = kittens::bf16>
+template<typename T>
 struct load_store {
     using dtype = T;
     template<typename RT_SHAPE, typename ST_SHAPE, int H, int W, int NW, kittens::ducks::rt_layout::all L> using valid = std::bool_constant<NW == 1 && W*H<=64>; // this is warp-level
@@ -59,9 +59,11 @@ struct load_store {
         o_ref = i_ref; // overwrite the whole thing
     }
     template<typename RT_SHAPE, typename ST_SHAPE, int H, int W, int NW, kittens::ducks::gl::all GL, kittens::ducks::rt_layout::all L> __device__ static void device_func(const GL input, const GL output) {
-        kittens::rt<dtype,RT_SHAPE::rows*H, RT_SHAPE::cols*W, L> reg_tile;
+        kittens::rt<dtype,RT_SHAPE::rows*H, RT_SHAPE::cols*W, L, RT_SHAPE> reg_tile;
         for(int i = 0; i < input.batch(); i++) for(int j = 0; j < input.depth(); j++) for(int k = 0; k < input.rows()/reg_tile.rows; k++) for(int l = 0; l < input.cols()/reg_tile.cols; l++) {
             kittens::load(reg_tile, input, {i, j, k, l});
+            __builtin_amdgcn_s_waitcnt(0);
+            __builtin_amdgcn_s_barrier();
             kittens::store(output, reg_tile, {i, j, k, l});
         }
     }
