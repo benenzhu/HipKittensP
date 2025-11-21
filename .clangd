@@ -1,0 +1,30 @@
+CompileFlags:
+  Add: 
+    - "-x"
+    - "hip"
+    - "--offload-arch=gfx942"
+    - "-I/root/HipKittens/include"
+    - "-I/root/HipKittens/prototype"
+    - "-I/opt/rocm-7.0.0/include"
+    - "-I/opt/rocm-7.0.0/include/hip"
+    - "-D__HIP_PLATFORM_AMD__"
+    - "-D__HIP_ROCclr__"
+    - "-DKITTENS_CDNA3"
+    - "-std=c++20"
+  Remove:
+    - "--save-temps"
+    - "--hip-link"
+
+Diagnostics:
+  UnusedIncludes: None
+  MissingIncludes: None
+
+CompilationDatabase: kernels/gemm/bf16fp32/mi325x/8192_256_256_64_16/
+
+If:
+  PathMatch: .*\.cuh
+CompileFlags:
+  Add:
+    - "-x"
+    - "hip"
+

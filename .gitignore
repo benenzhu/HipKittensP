@@ -23,3 +23,10 @@ build/
 *.so
 *.amdgcn
 utils/__pycache__/
+*.bc
+*.hipi
+*.out
+*.s
+*.hipfb
+.cache
+.specstory
