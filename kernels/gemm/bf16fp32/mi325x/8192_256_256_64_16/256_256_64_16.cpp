@@ -35,12 +35,14 @@ __global__ __launch_bounds__(NUM_THREADS, 2)
 void micro_tk(const micro_globals g) {
     extern __shared__ alignment_dummy __shm[];
     shared_allocator al((int*)&__shm[0]);
-    st_bf<BLOCK_SIZE, K_STEP> (&As) = al.allocate<st_bf<BLOCK_SIZE, K_STEP>>();
+    st_bf<BLOCK_SIZE, K_STEP> (&As) = al.allocate<st_bf<BLOCK_SIZE, K_STEP>>(); // BM=256, BN=256, BK=64
     st_bf<BLOCK_SIZE, K_STEP> (&Bs) = al.allocate<st_bf<BLOCK_SIZE, K_STEP>>();
 
-    rt_bf<REG_BLOCK, DOT_SLICE> tiles[8];
-    rt_fl<REG_BLOCK, REG_BLOCK, ducks::rt_layout::col> C_accum[2];
+    rt_bf<REG_BLOCK, DOT_SLICE> tiles[8]; // REG_BLOCK=64, DOT_SLICE=16
+    rt_fl<REG_BLOCK, REG_BLOCK, ducks::rt_layout::col> C_accum[2]; // REG_BLOCK=64, REG_BLOCK=64, layout=col
     for (int i = 0; i < 2; i++) { zero(C_accum[i]); }
+    // C_accum[0].height /*4*/ // 64 * 64 / 4 / 4 = 256.
+    // C_accum[0].width /*4*/
 
     // Get original WGID.
     int wgid = (blockIdx.y * gridDim.x) + blockIdx.x;
