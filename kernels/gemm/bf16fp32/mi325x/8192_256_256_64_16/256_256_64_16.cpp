@@ -1,3 +1,18 @@
+#include <memory>
+#include <string>
+#include <vector>
+#include <hip/hip_runtime.h>
+#include <hip/hip_bfloat16.h>
+#include <stdint.h>
+#include <type_traits>
+#include <concepts>
+#include <memory>
+#include <hip/hip_bf16.h>
+#include <hip/hip_fp16.h>
+#include <pybind11/pybind11.h>
+namespace zz{
+
+};
 #include "kittens.cuh"
 #include "pyutils/pyutils.cuh"
 using namespace kittens;
@@ -73,6 +88,18 @@ void micro_tk(const micro_globals g) {
     G::load(As, g.a, {0, 0, row, 0});
     G::load(Bs, g.b, {0, 0, col, 0});
     __builtin_amdgcn_s_barrier();
+    if constexpr (false) {
+        kittens::load<2,false>(As, g.a, {0, 0, row, 0});
+        constexpr auto _256 = st_bf<BLOCK_SIZE, K_STEP>::rows;
+        constexpr auto _64 = st_bf<BLOCK_SIZE, K_STEP>::cols;
+        using _ST = st_bf<BLOCK_SIZE, K_STEP>;
+        using _GL = gl<__hip_bfloat16, -1, -1, -1, -1>;
+        using idx = coord<_ST>;
+        auto idx_now = idx{0,0,row,0};
+        coord<> unit_coord = idx_now.unit_coord<2, 3>();
+        auto *src_ptr = &g.a[unit_coord];
+    }
+
 
     if (warp_row == 1) {
         __builtin_amdgcn_s_barrier();
