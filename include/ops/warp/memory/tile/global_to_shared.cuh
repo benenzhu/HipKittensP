@@ -137,7 +137,49 @@ __device__ inline void load_global_to_register_buffer(float4* reg_buffer, const 
         }
     }
 }
-
+namespace zz{
+    using GL = gl<__hip_bfloat16, -1, -1, -1, -1>;
+    using ST = st<__hip_bfloat16, 256, 64>;
+    using COORD = coord<ST>;
+    constexpr int N_THREADS = 512;
+    constexpr int axis = 2;
+    __attribute__((device)) inline void load_global_to_register_buffer(float4* reg_buffer, const int buffer_size, const GL& src, const COORD& idx, const ST& dst_template) {
+        constexpr int elem_per_memcpy_8 = sizeof(float4)/sizeof(__hip_bfloat16);
+        constexpr int memcpy_per_row_8 = ST::cols / elem_per_memcpy_8;
+        constexpr int total_chunks_2048 = (ST::rows * ST::cols) / elem_per_memcpy_8;
+        constexpr int total_calls_4 = (total_chunks_2048 + N_THREADS - 1) / N_THREADS;
+        constexpr int small_calls = 16;
+        const int big_calls_1 = (total_calls_4 + small_calls - 1) / small_calls;
+    
+        const int row_stride /*cols so 8192 here..*/ = src.template stride<axis>();
+        const int row_stride_bytes = row_stride * sizeof(__hip_bfloat16);
+        coord<> unit_coord = idx.template unit_coord<axis, 3>();
+        __hip_bfloat16* base_ptr = (__hip_bfloat16*)&src[unit_coord]; // global memory pointer
+        const int laneid = threadIdx.x % N_THREADS;
+    
+        // buffer resource
+        const int total_bytes = row_stride * ST::rows * sizeof(__hip_bfloat16);
+        i32x4 srsrc = make_srsrc(base_ptr, total_bytes, row_stride_bytes);
+    
+        int buf_idx = 0;
+        for (int i = 0; i < big_calls_1 && buf_idx < buffer_size; ++i) {
+            const int offset = i * small_calls;
+    #pragma unroll
+            for (int j = 0; j < small_calls; ++j) {
+                const int chunk_idx = (offset + j) * N_THREADS + laneid;
+                if (chunk_idx < total_chunks_2048 && buf_idx < buffer_size) {
+                    int row = chunk_idx / memcpy_per_row_8;
+                    int col = (chunk_idx % memcpy_per_row_8) * elem_per_memcpy_8;
+                    int flat_offset = row * row_stride + col;
+                    int byte_offset = flat_offset * sizeof(__hip_bfloat16);
+                    __uint128_t raw = llvm_amdgcn_raw_buffer_load_b128(srsrc, byte_offset, 0, 0);
+                    reg_buffer[buf_idx] = *reinterpret_cast<float4*>(&raw);
+                    buf_idx++;
+                }
+            }
+        }
+    }
+    } // namespace zz
 /**
  * @brief Store from registers to shared memory (preserving the batched pattern)
  *

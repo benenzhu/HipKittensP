@@ -126,7 +126,7 @@ void micro_tk(const micro_globals g) {
             using __hipbfloat16 = typename decltype(src)::dtype;
             // auto _row_layout 
             auto now2 = rt_bf<REG_BLOCK, DOT_SLICE>::packed_per_thread;
-            constexpr auto size = sizeof(tiles[1].data[0]);
+            // constexpr auto size = sizeof(tiles[1].data);
         }
         load(tiles[2], subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row + 2, 0}));
         load(tiles[0], subtile_inplace<REG_BLOCK, DOT_SLICE>(Bs, {warp_col, 0}));
