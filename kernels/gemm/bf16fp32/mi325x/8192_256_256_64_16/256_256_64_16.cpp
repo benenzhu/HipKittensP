@@ -110,13 +110,24 @@ void micro_tk(const micro_globals g) {
 
         // Small register buffers for pipelining
         // This is used instead of register tiles to enable the use of maximally coalesced global loads.
+        // 256 * 64 / 512 = 32;  // 一个 tile.
         constexpr int BUFFER_SIZE = (BLOCK_SIZE * K_STEP) / NUM_THREADS;
         float4 a_buffer_next[BUFFER_SIZE];
         float4 b_buffer_next[BUFFER_SIZE];
 
         // Cluster 0
         load_global_to_register_buffer<2, false, NUM_THREADS>(a_buffer_next, BUFFER_SIZE, g.a, {0, 0, row, tile + 1}, As);
+        // 64 * 16 / 512 = 2; // 一个小的subtile 横着 4个, 竖着 4 个
         load(tiles[1], subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row, 0}));
+        if constexpr (false) {
+            auto _1 = tiles[1].width;
+            auto _4 = tiles[1].height;
+            auto src = subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row, 0});
+            using __hipbfloat16 = typename decltype(src)::dtype;
+            // auto _row_layout 
+            auto now2 = rt_bf<REG_BLOCK, DOT_SLICE>::packed_per_thread;
+            constexpr auto size = sizeof(tiles[1].data[0]);
+        }
         load(tiles[2], subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row + 2, 0}));
         load(tiles[0], subtile_inplace<REG_BLOCK, DOT_SLICE>(Bs, {warp_col, 0}));
         __builtin_amdgcn_s_barrier();
@@ -127,6 +138,16 @@ void micro_tk(const micro_globals g) {
         __builtin_amdgcn_s_setprio(1);
         mma_ABt(C_accum[0], tiles[1], tiles[0], C_accum[0]);
         mma_ABt(C_accum[1], tiles[2], tiles[0], C_accum[1]);
+        if(0){
+            using _D = rt<float, 64, 64, ducks::rt_layout::col>;
+            using _A = rt<__hip_bfloat16, 64, 16, kittens::ducks::rt_layout::row>;
+            using _B = rt<__hip_bfloat16, 64, 16, kittens::ducks::rt_layout::row>;
+            auto __4 = _D::height;
+            auto  _4 = _D::width;
+            auto __1 = _A::width;
+            // __builtin_amdgcn_mfma_f32_16x16x16bf16_1k;
+            // 16次 mfma 
+        }
         __builtin_amdgcn_s_setprio(0);
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
