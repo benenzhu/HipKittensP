@@ -49,4 +49,4 @@ $(TARGET): $(SRC)
 
 # Clean target
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) *.bc *.o *.out *.s *.resolution.txt *.hipi *.hipfb *.so
