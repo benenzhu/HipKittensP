@@ -10,7 +10,7 @@
 #include <hip/hip_bf16.h>
 #include <hip/hip_fp16.h>
 #include <pybind11/pybind11.h>
-namespace zz{
+namespace ____start{
 
 };
 #include "kittens.cuh"
@@ -117,6 +117,9 @@ void micro_tk(const micro_globals g) {
 
         // Cluster 0
         load_global_to_register_buffer<2, false, NUM_THREADS>(a_buffer_next, BUFFER_SIZE, g.a, {0, 0, row, tile + 1}, As);
+        if(0){
+            kittens::zz::load_global_to_register_buffer(a_buffer_next, BUFFER_SIZE, g.a, {0, 0, row, tile + 1}, As);
+        }
         // 64 * 16 / 512 = 2; // 一个小的subtile 横着 4个, 竖着 4 个
         load(tiles[1], subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row, 0}));
         if constexpr (false) {
