@@ -9168,7 +9168,7 @@ void micro_tk(const micro_globals g) {
 
         // Cluster 0
         load_global_to_register_buffer<2, false, (kittens::WARP_THREADS * 8)>(a_buffer_next, BUFFER_SIZE, g.a, {0, 0, row, tile + 1}, As);
-        if(0){
+        if constexpr (false) {
             kittens::zz::load_global_to_register_buffer(a_buffer_next, BUFFER_SIZE, g.a, {0, 0, row, tile + 1}, As);
         }
         // 64 * 16 / 512 = 2; // 一个小的subtile 横着 4个, 竖着 4 个
@@ -9186,7 +9186,7 @@ void micro_tk(const micro_globals g) {
         __builtin_amdgcn_s_setprio(1);
         mma_ABt(C_accum[0], tiles[1], tiles[0], C_accum[0]);
         mma_ABt(C_accum[1], tiles[2], tiles[0], C_accum[1]);
-        if(0){
+        if constexpr (false) {
             using _D = rt<float, 64, 64, ducks::rt_layout::col>;
             using _A = rt<__hip_bfloat16, 64, 16, kittens::ducks::rt_layout::row>;
             using _B = rt<__hip_bfloat16, 64, 16, kittens::ducks::rt_layout::row>;
