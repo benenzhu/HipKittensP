@@ -8,6 +8,8 @@ CompileFlags:
     - "-I/opt/rocm-7.0.0/include"
     - "-I/opt/rocm-7.0.0/include/hip"
     - "-I/usr/include/python3.12/"
+    - "-I/usr/include/python3.10"
+    - "-I/opt/venv/lib/python3.10/site-packages/pybind11/include"
     - "-I/root/.venv/lib/python3.12/site-packages/torch/include"
     - "-D__HIP_PLATFORM_AMD__"
     - "-D__HIP_ROCclr__"

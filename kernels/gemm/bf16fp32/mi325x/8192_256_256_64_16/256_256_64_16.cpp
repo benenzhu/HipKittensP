@@ -112,8 +112,12 @@ void micro_tk(const micro_globals g) {
         // This is used instead of register tiles to enable the use of maximally coalesced global loads.
         // 256 * 64 / 512 = 32;  // 一个 tile.
         constexpr int BUFFER_SIZE = (BLOCK_SIZE * K_STEP) / NUM_THREADS;
-        float4 a_buffer_next[BUFFER_SIZE];
-        float4 b_buffer_next[BUFFER_SIZE];
+        float4 a_buffer_next[BUFFER_SIZE 
+            * sizeof(bf16) / sizeof(float4)
+        ];
+        float4 b_buffer_next[BUFFER_SIZE 
+            * sizeof(bf16) / sizeof(float4)
+        ];
 
         // Cluster 0
         load_global_to_register_buffer<2, false, NUM_THREADS>(a_buffer_next, BUFFER_SIZE, g.a, {0, 0, row, tile + 1}, As);
@@ -123,13 +127,8 @@ void micro_tk(const micro_globals g) {
         // 64 * 16 / 512 = 2; // 一个小的subtile 横着 4个, 竖着 4 个
         load(tiles[1], subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row, 0}));
         if constexpr (false) {
-            auto _1 = tiles[1].width;
-            auto _4 = tiles[1].height;
-            auto src = subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row, 0});
-            using __hipbfloat16 = typename decltype(src)::dtype;
-            // auto _row_layout 
-            auto now2 = rt_bf<REG_BLOCK, DOT_SLICE>::packed_per_thread;
-            // constexpr auto size = sizeof(tiles[1].data);
+            auto now = subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row, 0});
+            zz2::load(tiles[1], subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row, 0}));
         }
         load(tiles[2], subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row + 2, 0}));
         load(tiles[0], subtile_inplace<REG_BLOCK, DOT_SLICE>(Bs, {warp_col, 0}));
@@ -165,7 +164,8 @@ void micro_tk(const micro_globals g) {
         __builtin_amdgcn_sched_barrier(0);
 
         // Cluster 3
-        asm volatile("s_waitcnt lgkmcnt(0)");
+        // asm volatile("s_waitcnt lgkmcnt(0)");
+        asm volatile("s_waitcnt lgkmcnt(8)");  // 2 * 4(signle load)
         __builtin_amdgcn_s_setprio(1);
         mma_ABt(C_accum[0], tiles[4], tiles[3], C_accum[0]);
         mma_ABt(C_accum[1], tiles[5], tiles[3], C_accum[1]);
@@ -183,6 +183,7 @@ void micro_tk(const micro_globals g) {
         __builtin_amdgcn_sched_barrier(0);
 
         // Cluster 5
+        asm volatile("s_waitcnt lgkmcnt(12)");  // 2 * 4(signle load)
         __builtin_amdgcn_s_setprio(1);
         mma_ABt(C_accum[0], tiles[1], tiles[0], C_accum[0]);
         mma_ABt(C_accum[1], tiles[2], tiles[0], C_accum[1]);
@@ -191,7 +192,8 @@ void micro_tk(const micro_globals g) {
         __builtin_amdgcn_sched_barrier(0);
 
         // Cluster 6
-        asm volatile("s_waitcnt lgkmcnt(0)");
+        // asm volatile("s_waitcnt lgkmcnt(0)");
+        asm volatile("s_waitcnt lgkmcnt(0)"); // 3 * 4(signle load)
         store_register_buffer_to_shared<NUM_THREADS>(As, a_buffer_next);
         store_register_buffer_to_shared<NUM_THREADS>(Bs, b_buffer_next);
         __builtin_amdgcn_s_barrier();

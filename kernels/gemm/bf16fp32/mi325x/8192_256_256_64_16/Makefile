@@ -8,6 +8,7 @@ SRC=256_256_64_16.cpp
 ROCM_INSTALL_DIR := /opt/rocm-7.0.0
 HIP_INCLUDE_DIR  := $(ROCM_INSTALL_DIR)/include/hip
 ROCM_INCLUDE_DIR := $(ROCM_INSTALL_DIR)/include
+THUNDERKITTENS_ROOT := /root/HipKittens
 
 HIPCXX ?= $(ROCM_INSTALL_DIR)/bin/hipcc
 

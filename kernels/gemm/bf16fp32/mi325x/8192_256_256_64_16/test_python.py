@@ -61,7 +61,7 @@ if profiling:
 
 if profiling:
     num_warmup = 20
-    num_iters = 20
+    num_iters = 1000
 else:
     num_warmup = 1
     num_iters = 0
@@ -107,9 +107,14 @@ for _ in range(num_iters):
 if profiling:
     print(f"{C.dtype=}")
     avg_time = sum(timings) / len(timings)
-    tflops = flops_ref / (avg_time * 1e9) 
-    print(f"Average execution time: {avg_time:.4f} ms")
-    print(f"Performance: {tflops:.2f} TFLOPS for {N}x{N} matrix multiplication.\n")
+    timings.sort()
+    median_time = timings[len(timings) // 2]
+
+    tflops = flops_ref / (median_time * 1e9) 
+    tflops_mean = flops_ref / (avg_time * 1e9) 
+    print(f"Average execution time: {median_time:.4f} ms")
+    print(f"Mean   Performance: {tflops_mean:.2f} TFLOPS for {N}x{N} matrix multiplication.\n")
+    print(f"Median Performance: {tflops:.2f} TFLOPS for {N}x{N} matrix multiplication.\n")
 
 
 # Compare against reference

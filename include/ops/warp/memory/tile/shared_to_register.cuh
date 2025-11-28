@@ -99,6 +99,86 @@ __device__ inline static void load(RT &dst, const ST &src) {
 }
 
 
+namespace zz2{
+// template<ducks::rt::all RT, ducks::st::all ST>
+using RT = rt<__hip_bfloat16, 64, 16, kittens::ducks::rt_layout::row>;
+using ST = st_subtile<st<__hip_bfloat16, 256, 64>, 64, 16>;
+__attribute__((device)) inline static void load(RT &dst, const ST &src) {
+
+    static_assert(RT::height == ST::height, "register tile and shared tile must match height");
+    static_assert(RT::width == ST::width, "register tile and shared tile must match width");
+
+    using T2____hip_bfloat162 = RT::dtype;
+    using T____hip_bfloat16 = base_types::packing<T2____hip_bfloat162>::unpacked_type;
+    using __hip_bfloat16 = ST::dtype;
+    using __hip_bfloat162 = base_types::packing<__hip_bfloat16 >::packed_type;
+
+    const int laneid = kittens::laneid() % kittens::WARP_THREADS;
+    const uint32_t src_ptr = reinterpret_cast<uintptr_t>(&src.data[0]);
+
+    int row_offset, col_offset;
+    if constexpr (std::is_same_v<typename RT::layout, ducks::rt_layout::row>) {
+        // True this ....
+        row_offset = laneid%16;
+        col_offset = 4*(laneid/16);
+    }
+    else {
+        row_offset = 4*(laneid/16);
+        col_offset = laneid%16;
+    }
+
+
+#pragma unroll
+    for(int j = 0; j < dst.width; j++) { // 1
+        const int col = j*dst.tile_size_col + col_offset;
+        uint32_t addr = src.idx(src_ptr, {row_offset, col});
+#pragma unroll
+        for(int i = 0; i < dst.height; i++) { // 4
+            const int row = i*dst.tile_size_row + row_offset;
+            if constexpr (std::is_same_v<typename RT::layout, ducks::rt_layout::row>) { // handle the row-major layout
+
+                if constexpr (sizeof(typename ST::dtype) == 4) { // false // 2 here....
+                    // handle float32 // TODO: fix this function.
+                    float2 loaded0 = load_shared_vec_sync(src.idx(src_ptr, {row, col}));
+                    float2 loaded1 = load_shared_vec_sync(src.idx(src_ptr, {row, col+2}));
+                    dst.tiles[i][j].data[0] = base_types::convertor<T2____hip_bfloat162, __hip_bfloat162>::convert(loaded0);
+                    dst.tiles[i][j].data[1] = base_types::convertor<T2____hip_bfloat162, __hip_bfloat162>::convert(loaded1);
+                } else {
+                    // handle fp16 and bf16
+                    if constexpr (sizeof(T____hip_bfloat16) == sizeof(__hip_bfloat16)) {
+                        // Same size: no conversion needed (e.g., bf16->bf16 or half->half)
+                        // float2 loaded = load_shared_vec(src.idx(src_ptr, {row, col}));
+                        // U2* tmp = reinterpret_cast<U2*>(&loaded);
+                        // dst.tiles[i][j].data[0] = base_types::convertor<T2, U2>::convert(tmp[0]);
+                        // dst.tiles[i][j].data[1] = base_types::convertor<T2, U2>::convert(tmp[1]);
+
+                        // avoid v_bfi_b32
+                        asm volatile(
+                            "ds_read_b64 %0, %1 offset:%2\n"
+                            : "=v"(*reinterpret_cast<uint64_t*>(&dst.tiles[i][j].data[0]))
+                            : "v"(addr), "i"(i * ST::underlying_cols * kittens::TILE_ROW_DIM<__hip_bfloat16> * sizeof(__hip_bfloat16))
+                            : "memory"
+                        );
+                    } else {
+                        // Different size: converting bf16/half -> float
+                        // Need to load and convert each pair separately
+                        __hip_bfloat162 loaded0 = *reinterpret_cast<const __hip_bfloat162*>(&src[{row, col}]);
+                        __hip_bfloat162 loaded1 = *reinterpret_cast<const __hip_bfloat162*>(&src[{row, col+2}]);
+                        dst.tiles[i][j].data[0] = base_types::convertor<T2____hip_bfloat162, __hip_bfloat162>::convert(loaded0);
+                        dst.tiles[i][j].data[1] = base_types::convertor<T2____hip_bfloat162, __hip_bfloat162>::convert(loaded1);
+                    }
+                }
+            }
+            else { // handle the column-major layout
+                dst.tiles[i][j].data[0] = base_types::convertor<T2____hip_bfloat162, __hip_bfloat162>::convert(__hip_bfloat162{src[{row, col}], src[{row+1, col}]});
+                dst.tiles[i][j].data[1] = base_types::convertor<T2____hip_bfloat162, __hip_bfloat162>::convert(__hip_bfloat162{src[{row+2, col}], src[{row+3, col}]});
+            }
+        }
+    }
+}
+}
+
+
 /**
  * @brief Store data into a shared tile from a register tile.
  *
@@ -173,4 +253,7 @@ __device__ inline static void store(ST &dst, const RT &src) {
         }
     }
 }
+
+
+
 }
