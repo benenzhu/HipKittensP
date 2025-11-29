@@ -20,6 +20,7 @@ for line in lines:
 #include <hip/hip_bf16.h>
 #include <hip/hip_fp16.h>
 #include <pybind11/pybind11.h>
+#include <iostream>
 namespace ____start{
 
 """

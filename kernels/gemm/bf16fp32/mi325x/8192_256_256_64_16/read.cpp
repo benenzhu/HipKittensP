@@ -11,6 +11,7 @@
 #include <hip/hip_bf16.h>
 #include <hip/hip_fp16.h>
 #include <pybind11/pybind11.h>
+#include <iostream>
 namespace ____start{
 
 
@@ -8899,81 +8900,7 @@ using warpgroup = group<4>; // special scope commonly used by SM_90 and later.
 
 
 
-# 1 "/usr/lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/12/iostream" 1 3
-// Standard iostream objects -*- C++ -*-
 
-// Copyright (C) 1997-2022 Free Software Foundation, Inc.
-//
-// This file is part of the GNU ISO C++ Library.  This library is free
-// software; you can redistribute it and/or modify it under the
-// terms of the GNU General Public License as published by the
-// Free Software Foundation; either version 3, or (at your option)
-// any later version.
-
-// This library is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-
-// Under Section 7 of GPL version 3, you are granted additional
-// permissions described in the GCC Runtime Library Exception, version
-// 3.1, as published by the Free Software Foundation.
-
-// You should have received a copy of the GNU General Public License and
-// a copy of the GCC Runtime Library Exception along with this program;
-// see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
-// <http://www.gnu.org/licenses/>.
-
-/** @file include/iostream
- *  This is a Standard C++ Library header.
- */
-
-//
-// ISO C++ 14882: 27.3  Standard iostream objects
-//
-# 37 "/usr/lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/12/iostream" 3
-
-
-
-
-
-namespace std __attribute__ ((__visibility__ ("default")))
-{
-
-
-  /**
-   *  @name Standard Stream Objects
-   *
-   *  The &lt;iostream&gt; header declares the eight <em>standard stream
-   *  objects</em>.  For other declarations, see
-   *  http://gcc.gnu.org/onlinedocs/libstdc++/manual/io.html
-   *  and the @link iosfwd I/O forward declarations @endlink
-   *
-   *  They are required by default to cooperate with the global C
-   *  library's @c FILE streams, and to be available during program
-   *  startup and termination. For more information, see the section of the
-   *  manual linked to above.
-  */
-  ///@{
-  extern istream cin; /// Linked to standard input
-  extern ostream cout; /// Linked to standard output
-  extern ostream cerr; /// Linked to standard error (unbuffered)
-  extern ostream clog; /// Linked to standard error (buffered)
-
-
-  extern wistream wcin; /// Linked to standard input
-  extern wostream wcout; /// Linked to standard output
-  extern wostream wcerr; /// Linked to standard error (unbuffered)
-  extern wostream wclog; /// Linked to standard error (buffered)
-
-  ///@}
-
-  // For construction of filebuffers for cout, cin, cerr, clog et. al.
-  static ios_base::Init __ioinit;
-
-
-} // namespace
-# 5 "/root/HipKittens//include/pyutils/util.cuh" 2
 
 
 template <typename T>
@@ -8992,7 +8919,7 @@ void check(T err, char const* const func, char const* const file,
 
 
 // #include "pyutils/pyutils.cuh" // for simple binding without including torch
-# 17 "256_256_64_16.cpp" 2
+# 18 "256_256_64_16.cpp" 2
 # 1 "/root/HipKittens//include/pyutils/pyutils.cuh" 1
 
 
@@ -9068,14 +8995,14 @@ template<auto function, typename TGlobal> static void bind_function(auto m, auto
 
 } // namespace py
 } // namespace kittens
-# 18 "256_256_64_16.cpp" 2
+# 19 "256_256_64_16.cpp" 2
 using namespace kittens;
 
 constexpr int BLOCK_SIZE = 256;
 constexpr int K_STEP = 64;
 constexpr int REG_BLOCK = BLOCK_SIZE / 4;
 constexpr int DOT_SLICE = 16;
-# 32 "256_256_64_16.cpp"
+# 33 "256_256_64_16.cpp"
 using _gl_A = gl<bf16, -1, -1, -1, -1>;
 using _gl_B = gl<bf16, -1, -1, -1, -1>;
 using _gl_C = gl<bf16, -1, -1, -1, -1>;
@@ -9168,12 +9095,13 @@ void micro_tk(const micro_globals g) {
 
         // Cluster 0
         load_global_to_register_buffer<2, false, (kittens::WARP_THREADS * 8)>(a_buffer_next, BUFFER_SIZE, g.a, {0, 0, row, tile + 1}, As);
-        if constexpr (false) {
+        if(0){
             kittens::zz::load_global_to_register_buffer(a_buffer_next, BUFFER_SIZE, g.a, {0, 0, row, tile + 1}, As);
         }
         // 64 * 16 / 512 = 2; // 一个小的subtile 横着 4个, 竖着 4 个
         load(tiles[1], subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row, 0}));
         if constexpr (false) {
+            auto now = subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row, 0});
             zz2::load(tiles[1], subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row, 0}));
         }
         load(tiles[2], subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row + 2, 0}));
@@ -9186,7 +9114,7 @@ void micro_tk(const micro_globals g) {
         __builtin_amdgcn_s_setprio(1);
         mma_ABt(C_accum[0], tiles[1], tiles[0], C_accum[0]);
         mma_ABt(C_accum[1], tiles[2], tiles[0], C_accum[1]);
-        if constexpr (false) {
+        if(0){
             using _D = rt<float, 64, 64, ducks::rt_layout::col>;
             using _A = rt<__hip_bfloat16, 64, 16, kittens::ducks::rt_layout::row>;
             using _B = rt<__hip_bfloat16, 64, 16, kittens::ducks::rt_layout::row>;
@@ -9331,7 +9259,7 @@ void dispatch_micro(micro_globals g) {
     micro_tk<<<g.grid(), g.block(), mem_size, g.stream>>>(g);
 }
 
-static ::pybind11::module_::module_def pybind11_module_def_tk_kernel [[maybe_unused]]; [[maybe_unused]] static void pybind11_init_tk_kernel(::pybind11::module_ &); extern "C" [[maybe_unused]] __attribute__((visibility("default"))) PyObject *PyInit_tk_kernel(); extern "C" __attribute__((visibility("default"))) PyObject *PyInit_tk_kernel() { { const char *compiled_ver = "3" "." "10"; const char *runtime_ver = Py_GetVersion(); size_t len = std::strlen(compiled_ver); if (std::strncmp(runtime_ver, compiled_ver, len) != 0 || (runtime_ver[len] >= '0' && runtime_ver[len] <= '9')) { PyErr_Format(PyExc_ImportError, "Python version mismatch: module was compiled for Python %s, " "but the interpreter version is incompatible: %s.", compiled_ver, runtime_ver); return nullptr; } } pybind11::detail::get_internals(); auto m = ::pybind11::module_::create_extension_module( "tk_kernel", nullptr, &pybind11_module_def_tk_kernel); try { pybind11_init_tk_kernel(m); return m.ptr(); } catch (pybind11::error_already_set & e) { pybind11::raise_from(e, PyExc_ImportError, "initialization failed"); return nullptr; } catch (const std::exception &e) { ::pybind11::set_error(PyExc_ImportError, e.what()); return nullptr; } } void pybind11_init_tk_kernel(::pybind11::module_ & (m)) {
+static int pybind11_exec_tk_kernel(PyObject *); extern "C" [[maybe_unused]] __attribute__((visibility("default"))) PyObject *PyInit_tk_kernel(); extern "C" __attribute__((visibility("default"))) PyObject *PyInit_tk_kernel() { { const char *compiled_ver = "3" "." "12"; const char *runtime_ver = Py_GetVersion(); size_t len = std::strlen(compiled_ver); if (std::strncmp(runtime_ver, compiled_ver, len) != 0 || (runtime_ver[len] >= '0' && runtime_ver[len] <= '9')) { PyErr_Format(PyExc_ImportError, "Python version mismatch: module was compiled for Python %s, " "but the interpreter version is incompatible: %s.", compiled_ver, runtime_ver); return nullptr; } } (pybind11::detail::get_num_interpreters_seen() += 1); { pybind11::detail::get_internals_pp_manager().unref(); pybind11::detail::get_internals(); } static ::pybind11::detail::slots_array mod_def_slots = ::pybind11::detail::init_slots( &pybind11_exec_tk_kernel); static PyModuleDef def{ { { { 1 }, (nullptr) }, nullptr, 0, nullptr, }, "tk_kernel", nullptr, 0, nullptr, mod_def_slots.data(), nullptr, nullptr, nullptr}; return PyModuleDef_Init(&def); } static void pybind11_init_tk_kernel(::pybind11::module_ &); int pybind11_exec_tk_kernel(PyObject * pm) { try { auto m = pybind11::reinterpret_borrow<::pybind11::module_>(pm); if (!pybind11::detail::get_cached_module(m.attr("__spec__").attr("name"))) { pybind11_init_tk_kernel(m); pybind11::detail::cache_completed_module(m); } return 0; } catch (pybind11::error_already_set & e) { pybind11::raise_from(e, PyExc_ImportError, "initialization failed"); } catch (const std::exception &e) { ::pybind11::set_error(PyExc_ImportError, e.what()); } return -1; } void pybind11_init_tk_kernel(::pybind11::module_ & m) {
     m.doc() = "tk_kernel python module";
     py::bind_kernel<micro_tk>(m, "micro_tk", &micro_globals::a, &micro_globals::b, &micro_globals::c);
     py::bind_function<dispatch_micro>(m, "dispatch_micro", &micro_globals::a, &micro_globals::b, &micro_globals::c);
