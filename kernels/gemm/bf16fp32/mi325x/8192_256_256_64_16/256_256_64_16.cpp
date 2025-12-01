@@ -89,17 +89,17 @@ void micro_tk(const micro_globals g) {
     G::load(As, g.a, {0, 0, row, 0});
     G::load(Bs, g.b, {0, 0, col, 0});
     __builtin_amdgcn_s_barrier();
-    if constexpr (false) {
-        kittens::load<2,false>(As, g.a, {0, 0, row, 0});
-        constexpr auto _256 = st_bf<BLOCK_SIZE, K_STEP>::rows;
-        constexpr auto _64 = st_bf<BLOCK_SIZE, K_STEP>::cols;
-        using _ST = st_bf<BLOCK_SIZE, K_STEP>;
-        using _GL = gl<__hip_bfloat16, -1, -1, -1, -1>;
-        using idx = coord<_ST>;
-        auto idx_now = idx{0,0,row,0};
-        coord<> unit_coord = idx_now.unit_coord<2, 3>();
-        auto *src_ptr = &g.a[unit_coord];
-    }
+    // if constexpr (false) {
+    //     kittens::load<2,false>(As, g.a, {0, 0, row, 0});
+    //     constexpr auto _256 = st_bf<BLOCK_SIZE, K_STEP>::rows;
+    //     constexpr auto _64 = st_bf<BLOCK_SIZE, K_STEP>::cols;
+    //     using _ST = st_bf<BLOCK_SIZE, K_STEP>;
+    //     using _GL = gl<__hip_bfloat16, -1, -1, -1, -1>;
+    //     using idx = coord<_ST>;
+    //     auto idx_now = idx{0,0,row,0};
+    //     coord<> unit_coord = idx_now.unit_coord<2, 3>();
+    //     auto *src_ptr = &g.a[unit_coord];
+    // }
 
 
     if (warp_row == 1) {
@@ -113,24 +113,17 @@ void micro_tk(const micro_globals g) {
         // This is used instead of register tiles to enable the use of maximally coalesced global loads.
         // 256 * 64 / 512 = 32;  // 一个 tile.
         constexpr int BUFFER_SIZE = (BLOCK_SIZE * K_STEP) / NUM_THREADS;
-        float4 a_buffer_next[BUFFER_SIZE 
-            * sizeof(bf16) / sizeof(float4)
-        ];
-        float4 b_buffer_next[BUFFER_SIZE 
-            * sizeof(bf16) / sizeof(float4)
-        ];
+        float4 a_buffer_next[BUFFER_SIZE * sizeof(bf16) / sizeof(float4)];
+        float4 b_buffer_next[BUFFER_SIZE * sizeof(bf16) / sizeof(float4)];
 
         // Cluster 0
         load_global_to_register_buffer<2, false, NUM_THREADS>(a_buffer_next, BUFFER_SIZE, g.a, {0, 0, row, tile + 1}, As);
-        if(0){
-            kittens::zz::load_global_to_register_buffer(a_buffer_next, BUFFER_SIZE, g.a, {0, 0, row, tile + 1}, As);
-        }
         // 64 * 16 / 512 = 2; // 一个小的subtile 横着 4个, 竖着 4 个
         load(tiles[1], subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row, 0}));
-        if constexpr (false) {
-            auto now = subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row, 0});
-            zz2::load(tiles[1], subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row, 0}));
-        }
+        // if constexpr (false) {
+        //     auto now = subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row, 0});
+        //     zz2::load(tiles[1], subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row, 0}));
+        // }
         load(tiles[2], subtile_inplace<REG_BLOCK, DOT_SLICE>(As, {warp_row + 2, 0}));
         load(tiles[0], subtile_inplace<REG_BLOCK, DOT_SLICE>(Bs, {warp_col, 0}));
         __builtin_amdgcn_s_barrier();
@@ -141,16 +134,16 @@ void micro_tk(const micro_globals g) {
         __builtin_amdgcn_s_setprio(1);
         mma_ABt(C_accum[0], tiles[1], tiles[0], C_accum[0]);
         mma_ABt(C_accum[1], tiles[2], tiles[0], C_accum[1]);
-        if(0){
-            using _D = rt<float, 64, 64, ducks::rt_layout::col>;
-            using _A = rt<__hip_bfloat16, 64, 16, kittens::ducks::rt_layout::row>;
-            using _B = rt<__hip_bfloat16, 64, 16, kittens::ducks::rt_layout::row>;
-            auto __4 = _D::height;
-            auto  _4 = _D::width;
-            auto __1 = _A::width;
-            // __builtin_amdgcn_mfma_f32_16x16x16bf16_1k;
-            // 16次 mfma 
-        }
+        // if(0){
+        //     using _D = rt<float, 64, 64, ducks::rt_layout::col>;
+        //     using _A = rt<__hip_bfloat16, 64, 16, kittens::ducks::rt_layout::row>;
+        //     using _B = rt<__hip_bfloat16, 64, 16, kittens::ducks::rt_layout::row>;
+        //     auto __4 = _D::height;
+        //     auto  _4 = _D::width;
+        //     auto __1 = _A::width;
+        //     // __builtin_amdgcn_mfma_f32_16x16x16bf16_1k;
+        //     // 16次 mfma 
+        // }
         __builtin_amdgcn_s_setprio(0);
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
@@ -166,7 +159,7 @@ void micro_tk(const micro_globals g) {
 
         // Cluster 3
         // asm volatile("s_waitcnt lgkmcnt(0)");
-        asm volatile("s_waitcnt lgkmcnt(8)");  // 2 * 4(signle load)
+        asm volatile("s_waitcnt lgkmcnt(0)");  // 2 * 4(signle load)
         __builtin_amdgcn_s_setprio(1);
         mma_ABt(C_accum[0], tiles[4], tiles[3], C_accum[0]);
         mma_ABt(C_accum[1], tiles[5], tiles[3], C_accum[1]);
@@ -184,7 +177,7 @@ void micro_tk(const micro_globals g) {
         __builtin_amdgcn_sched_barrier(0);
 
         // Cluster 5
-        asm volatile("s_waitcnt lgkmcnt(12)");  // 2 * 4(signle load)
+        // asm volatile("s_waitcnt lgkmcnt(12)");  // 2 * 4(signle load)
         __builtin_amdgcn_s_setprio(1);
         mma_ABt(C_accum[0], tiles[1], tiles[0], C_accum[0]);
         mma_ABt(C_accum[1], tiles[2], tiles[0], C_accum[1]);
@@ -193,7 +186,6 @@ void micro_tk(const micro_globals g) {
         __builtin_amdgcn_sched_barrier(0);
 
         // Cluster 6
-        // asm volatile("s_waitcnt lgkmcnt(0)");
         asm volatile("s_waitcnt lgkmcnt(0)"); // 3 * 4(signle load)
         store_register_buffer_to_shared<NUM_THREADS>(As, a_buffer_next);
         store_register_buffer_to_shared<NUM_THREADS>(Bs, b_buffer_next);
