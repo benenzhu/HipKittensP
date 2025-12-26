@@ -19,6 +19,8 @@ else ifeq ($(GPU_TARGET),CDNA4)
 HIPFLAGS+= -DKITTENS_CDNA4 --offload-arch=gfx950
 endif
 
+THUNDERKITTENS_ROOT=/A/HipKittens
+
 # Common variables and flags
 CXX_STD   := c++20
 ICXXFLAGS := -std=$(CXX_STD)

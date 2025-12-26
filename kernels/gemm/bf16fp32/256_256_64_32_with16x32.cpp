@@ -37,12 +37,16 @@ struct micro_globals {
 
 __global__ __launch_bounds__(NUM_THREADS, 2)
 void micro_tk(const micro_globals g, int M, int N, int K) {
+    // if (threadIdx.x == 0 && blockIdx.x == 0) {
+    //     printf("M: %d, N: %d, K: %d\n", M, N, K);
+    // }
+    // __syncthreads();
     extern __shared__ alignment_dummy __shm[];
     shared_allocator al((int*)&__shm[0]);
-    using ST_A = st_bf<HALF_BLOCK_SIZE, K_STEP, st_16x32_s>;
-    using ST_B = st_bf<HALF_BLOCK_SIZE, K_STEP, st_16x32_s>;
-    ST_A (&As)[2][2] = al.allocate<ST_A, 2, 2>();
-    ST_B (&Bs)[2][2] = al.allocate<ST_B, 2, 2>();
+    using ST_A = st_bf<HALF_BLOCK_SIZE, K_STEP, st_16x32_s>; // 128 * 8 * 2 = 2048    16384 (0x4000)
+    using ST_B = st_bf<HALF_BLOCK_SIZE, K_STEP, st_16x32_s>; // 16384 (0x4000)
+    ST_A (&As)[2][2] = al.allocate<ST_A, 2, 2>();  // total:: 160000 (0x27100) 只用了一半加起来？
+    ST_B (&Bs)[2][2] = al.allocate<ST_B, 2, 2>();  // 160000/16384=9.76
 
     rt_bf<HALF_REG_BLOCK_M, K_STEP, row_l, rt_16x32_s> A_tile;
     rt_bf<HALF_REG_BLOCK_N, K_STEP, row_l, rt_16x32_s> B_tile_0;
