@@ -43,15 +43,18 @@ void micro_tk(const micro_globals g, int M, int N, int K) {
     // __syncthreads();
     extern __shared__ alignment_dummy __shm[];
     shared_allocator al((int*)&__shm[0]);
-    using ST_A = st_bf<HALF_BLOCK_SIZE, K_STEP, st_16x32_s>; // 128 * 8 * 2 = 2048    16384 (0x4000)
+    using ST_A = st_bf<HALF_BLOCK_SIZE, K_STEP, st_16x32_s>; // 128 * 64 * 2 = 16384 (0x4000)
     using ST_B = st_bf<HALF_BLOCK_SIZE, K_STEP, st_16x32_s>; // 16384 (0x4000)
     ST_A (&As)[2][2] = al.allocate<ST_A, 2, 2>();  // total:: 160000 (0x27100) 只用了一半加起来？
     ST_B (&Bs)[2][2] = al.allocate<ST_B, 2, 2>();  // 160000/16384=9.76
 
-    rt_bf<HALF_REG_BLOCK_M, K_STEP, row_l, rt_16x32_s> A_tile;
-    rt_bf<HALF_REG_BLOCK_N, K_STEP, row_l, rt_16x32_s> B_tile_0;
-    rt_bf<HALF_REG_BLOCK_N, K_STEP, row_l, rt_16x32_s> B_tile_1;
-    rt_fl<HALF_REG_BLOCK_M, HALF_REG_BLOCK_N, col_l, rt_16x16_s> C_accum[2][2];
+    rt_bf<HALF_REG_BLOCK_M, K_STEP, row_l, rt_16x32_s> A_tile; // 64 * 64 regs.  // 128B per tile.
+                                                            //    const int now = sizeof(A_tile);
+                                                            //    const int now2 = 64 * 64 * 2 / 64;
+    rt_bf<HALF_REG_BLOCK_N, K_STEP, row_l, rt_16x32_s> B_tile_0; // 32 * 64 regs. // 64B per tile.
+    rt_bf<HALF_REG_BLOCK_N, K_STEP, row_l, rt_16x32_s> B_tile_1; // 32 * 64 // 64B 
+    rt_fl<HALF_REG_BLOCK_M, HALF_REG_BLOCK_N, col_l, rt_16x16_s> C_accum[2][2]; // 64 * 32.
+                                                            //    const int now = sizeof(C_accum[0][0]);
     zero(C_accum[0][0]);
     zero(C_accum[0][1]);
     zero(C_accum[1][0]);

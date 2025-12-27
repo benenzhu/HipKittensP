@@ -1,5 +1,5 @@
 CompileFlags:
-  Compiler: /opt/rocm/bin/hipcc
+  # Compiler: /opt/rocm/bin/hipcc
   Add: 
     - "-x"
     - "hip"
@@ -18,6 +18,8 @@ CompileFlags:
     - "-I/opt/venv/lib/python3.12/site-packages/torch/include/"
     - "-I/opt/rocm-7.1.1/include/hip/"
     - "-I/opt/venv/lib/python3.10/site-packages/torch/include/"
+    - "-I/home/tazhu/.local/lib/python3.12/site-packages/pybind11/include/"
+    - "-Dzz"
     - "-D__HIP_PLATFORM_AMD__"
     - "-D__HIP_ROCclr__"
     - "-DKITTENS_CDNA3"
