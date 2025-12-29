@@ -1,3 +1,21 @@
+#include <memory>
+#include <string>
+#include <vector>
+#include <hip/hip_runtime.h>
+#include <hip/hip_bfloat16.h>
+#include <stdint.h>
+#include <type_traits>
+#include <concepts>
+#include <memory>
+#include <hip/hip_bf16.h>
+#include <hip/hip_fp16.h>
+#include <pybind11/pybind11.h>
+#include <iostream>
+#include <hip_fp8.h>
+#include <hip/hip_fp8.h>
+namespace ____start{
+
+};
 #include "kittens.cuh"
 #include "pyutils/pyutils.cuh"
 using namespace kittens;
@@ -120,6 +138,7 @@ void micro_tk(const micro_globals g, int M, int N, int K) {
     G::prefill_swizzled_offsets(As[0][0], g.a, swizzled_offsets_A);
     G::prefill_swizzled_offsets(Bs[0][0], g.b, swizzled_offsets_B);
 
+    // global_to_shared.cuh
     G::load(Bs[tic][0], g.b, {0, 0, col*2, 0}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds_00);
     G::load(As[tic][0], g.a, {0, 0, row*2, 0}, swizzled_offsets_A, a_srsrc_base, a_base, a_lds_00);
     G::load(Bs[tic][1], g.b, {0, 0, col*2 + 1, 0}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds_01);

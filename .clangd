@@ -1,5 +1,5 @@
 CompileFlags:
-  # Compiler: /opt/rocm/bin/hipcc
+  Compiler: /opt/rocm/bin/hipcc --offload-arch=gfx950
   Add: 
     - "-x"
     - "hip"
