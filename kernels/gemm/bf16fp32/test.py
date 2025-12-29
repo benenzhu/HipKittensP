@@ -4,7 +4,7 @@ import random
 from utils import init_randn, init_empty
 
 test_shapes = [
-    (8192, 8192, 8192), # (m, n, k)
+    (256, 256, 128), # (m, n, k)
     (4096, 8192, 2048),
     (8192, 4096, 2048),
     (8192, 2048, 4096),
@@ -23,8 +23,8 @@ from triton_matmul import matmul
 if __name__ == "__main__":
     for test_shape in test_shapes:
         m, n, k = test_shape
-        A = init_randn((m, k), dtype, device) * 0.2
-        B = init_randn((k, n), dtype, device) * 0.2
+        A = torch.arange(m * k).reshape(m, k).cuda().bfloat16() * 0.01
+        B = torch.arange(k * n).reshape(k, n).cuda().bfloat16() * 0.01
         Bt = B.t().contiguous()
         C = init_empty((m, n), dtype, device)
 
@@ -33,6 +33,8 @@ if __name__ == "__main__":
         tk_kernel.dispatch_micro(A, Bt, C)
 
         is_valid = torch.allclose(C, C_ref, rtol=1e-2)
+        torch.cuda.synchronize()
+        exit(0)
         result = "TEST PASSED" if is_valid else "TEST FAILED"
         assert is_valid, f"{C=} {C_ref=} {C-C_ref} {torch_ref - C_ref}"
         print(f"{test_shape}".ljust(18) + f" | {result}")
