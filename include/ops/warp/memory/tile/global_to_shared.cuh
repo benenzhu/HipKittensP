@@ -251,7 +251,7 @@ __device__ static inline void load(ST &dst, const GL &src, const COORD &idx, con
 
 
 using as3_uint32_ptr = __attribute__((address_space(3))) unsigned int*;
-inline __device__ __forceinline__ uint32_t to_sgpr_u32(uint32_t x) {
+__device__ __forceinline__ uint32_t to_sgpr_u32(uint32_t x) {
     x = __builtin_amdgcn_readfirstlane(x); // make uniform
     asm volatile("" : "+s"(x));            // keep in SGPR class
     return x;

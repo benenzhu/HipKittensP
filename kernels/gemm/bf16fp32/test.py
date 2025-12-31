@@ -23,6 +23,7 @@ from triton_matmul import matmul
 if __name__ == "__main__":
     for test_shape in test_shapes:
         m, n, k = test_shape
+        print(f"{m=}, {n=}, {k=}")
         A = torch.arange(m * k).reshape(m, k).cuda().bfloat16() * 0.01
         B = torch.arange(k * n).reshape(k, n).cuda().bfloat16() * 0.01
         Bt = B.t().contiguous()
@@ -33,6 +34,8 @@ if __name__ == "__main__":
         tk_kernel.dispatch_micro(A, Bt, C)
 
         is_valid = torch.allclose(C, C_ref, rtol=1e-2)
+        A = torch.arange(128).repeat(256).reshape(256, 128).cuda().bfloat16() * 0.01
+        tk_kernel.dispatch_micro(A, Bt, C)
         torch.cuda.synchronize()
         exit(0)
         result = "TEST PASSED" if is_valid else "TEST FAILED"

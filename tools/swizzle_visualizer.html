@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Swizzle Visualizer - MI355X (64 Banks)</title>
+    <style>
+        :root {
+            --bg-dark: #1a1a2e;
+            --bg-card: #16213e;
+            --accent: #e94560;
+            --accent-secondary: #0f3460;
+            --text: #eaeaea;
+            --text-dim: #a0a0a0;
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            background: var(--bg-dark);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 8px;
+            font-size: 1.8rem;
+            background: linear-gradient(135deg, var(--accent), #ff6b6b);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .subtitle {
+            text-align: center;
+            color: var(--text-dim);
+            margin-bottom: 24px;
+            font-size: 0.9rem;
+        }
+        
+        .container {
+            max-width: 2400px;
+            margin: 0 auto;
+        }
+        
+        .controls {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+        }
+        
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        
+        .control-group.wide {
+            grid-column: 1 / -1;
+        }
+        
+        label {
+            font-size: 0.85rem;
+            color: var(--text-dim);
+            font-weight: 500;
+        }
+        
+        input, select, textarea {
+            background: var(--bg-dark);
+            border: 1px solid var(--accent-secondary);
+            color: var(--text);
+            padding: 10px 12px;
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 0.9rem;
+            transition: border-color 0.2s;
+        }
+        
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        
+        textarea {
+            min-height: 60px;
+            resize: vertical;
+        }
+        
+        .preset-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 4px;
+        }
+        
+        button {
+            background: var(--accent-secondary);
+            color: var(--text);
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+        
+        button:hover {
+            background: var(--accent);
+            transform: translateY(-1px);
+        }
+        
+        button.active {
+            background: var(--accent);
+        }
+        
+        .visualizations {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+        }
+        
+        .viz-panel {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 20px;
+            overflow: auto;
+        }
+        
+        .viz-title {
+            font-size: 1.1rem;
+            margin-bottom: 16px;
+            color: var(--accent);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .grid-container {
+            overflow-x: auto;
+            overflow-y: visible;
+            padding-bottom: 10px;
+        }
+        
+        .tile-grid {
+            display: inline-grid;
+            gap: 2px;
+            font-size: 10px;
+        }
+        
+        .cell {
+            width: 32px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 3px;
+            font-weight: 500;
+            position: relative;
+            transition: transform 0.1s;
+            font-size: 9px;
+        }
+        
+        .cell:hover {
+            transform: scale(1.15);
+            z-index: 10;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        }
+        
+        .cell .coords {
+            display: none;
+        }
+        
+        .cell:hover .coords {
+            display: block;
+            font-size: 7px;
+            position: absolute;
+            top: 1px;
+            left: 2px;
+            opacity: 0.8;
+        }
+        
+        .header-cell {
+            background: var(--accent-secondary) !important;
+            color: var(--text-dim);
+            font-size: 9px;
+        }
+        
+        .stats {
+            margin-top: 16px;
+            padding: 12px;
+            background: var(--bg-dark);
+            border-radius: 8px;
+            font-size: 0.85rem;
+        }
+        
+        .stats-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            border-bottom: 1px solid var(--accent-secondary);
+        }
+        
+        .stats-row:last-child {
+            border-bottom: none;
+        }
+        
+        .conflict-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .conflict-none { background: #4ade80; }
+        .conflict-low { background: #facc15; }
+        .conflict-high { background: #ef4444; }
+        
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 16px;
+            padding: 12px;
+            background: var(--bg-dark);
+            border-radius: 8px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.75rem;
+        }
+        
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+        }
+
+        .code-hint {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            margin-top: 4px;
+        }
+        
+        .info-box {
+            background: var(--bg-dark);
+            border-left: 3px solid var(--accent);
+            padding: 12px;
+            margin-bottom: 20px;
+            border-radius: 0 8px 8px 0;
+            font-size: 0.85rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔀 Swizzle Pattern Visualizer</h1>
+        <p class="subtitle">AMD MI355X - 64 LDS Banks | bf16/fp8 Memory Layout Analysis</p>
+        
+        <div class="info-box">
+            <strong>使用说明:</strong> 选择预设或手动输入行列数和 swizzle 表达式。
+            表达式中可用变量: <code>offset</code> (字节偏移), <code>r</code> (行), <code>c</code> (列), <code>cols</code> (列数), <code>sizeof_T</code> (元素大小)
+        </div>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label>Tile 行数 (rows)</label>
+                <input type="number" id="rows" value="16" min="1" max="128">
+            </div>
+            <div class="control-group">
+                <label>Tile 列数 (cols)</label>
+                <input type="number" id="cols" value="32" min="1" max="128">
+            </div>
+            <div class="control-group">
+                <label>元素大小 (bytes)</label>
+                <select id="sizeof_T">
+                    <option value="1">1 (fp8)</option>
+                    <option value="2" selected>2 (bf16/half)</option>
+                    <option value="4">4 (float)</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Bank 数量</label>
+                <input type="number" id="numBanks" value="64" min="16" max="128">
+            </div>
+            <div class="control-group">
+                <label>Bank 宽度 (bytes)</label>
+                <input type="number" id="bankWidth" value="4" min="1" max="16">
+            </div>
+            
+            <div class="control-group wide">
+                <label>预设 Tile Shapes</label>
+                <div class="preset-buttons">
+                    <button onclick="loadPreset('st_16x16')">st_16x16</button>
+                    <button onclick="loadPreset('st_16x16_swizzled')">st_16x16_swizzled</button>
+                    <button onclick="loadPreset('st_32x32')">st_32x32</button>
+                    <button onclick="loadPreset('st_16x32')" class="active">st_16x32</button>
+                    <button onclick="loadPreset('st_32x16')">st_32x16</button>
+                    <button onclick="loadPreset('st_8x32')">st_8x32</button>
+                    <button onclick="loadPreset('st_16x128')">st_16x128</button>
+                    <button onclick="loadPreset('no_swizzle')">无 Swizzle</button>
+                </div>
+            </div>
+            
+            <div class="control-group wide">
+                <label>Swizzle 表达式 (返回 swizzled 字节偏移)</label>
+                <textarea id="swizzleExpr">// st_16x32 bf16 swizzle
+const swizzle_mask = ((offset % 1024) >> 9) << 5;
+return offset ^ swizzle_mask;</textarea>
+                <div class="code-hint">
+                    可用变量: offset, r, c, cols, sizeof_T | 例: <code>return offset ^ (((offset % 1024) >> 9) << 5);</code>
+                </div>
+            </div>
+            
+            <div class="control-group">
+                <button onclick="updateVisualization()" style="background: var(--accent); padding: 12px 24px;">
+                    🔄 更新可视化
+                </button>
+            </div>
+        </div>
+        
+        <div class="visualizations">
+            <div class="viz-panel">
+                <div class="viz-title">📊 原始布局 (无 Swizzle) - Bank 分布</div>
+                <div class="grid-container" id="originalGrid"></div>
+                <div class="stats" id="originalStats"></div>
+            </div>
+            
+            <div class="viz-panel">
+                <div class="viz-title">✨ Swizzle 后布局 - Bank 分布</div>
+                <div class="grid-container" id="swizzledGrid"></div>
+                <div class="stats" id="swizzledStats"></div>
+            </div>
+        </div>
+        
+        <div class="viz-panel" style="margin-top: 20px;">
+            <div class="viz-title">🎨 Bank 颜色图例</div>
+            <div class="legend" id="legend"></div>
+        </div>
+    </div>
+
+    <script>
+        // 预设配置
+        const presets = {
+            'st_16x16': {
+                rows: 16, cols: 16, sizeof_T: 2,
+                expr: `// st_16x16: 无 swizzle
+return offset;`
+            },
+            'st_16x16_swizzled': {
+                rows: 16, cols: 16, sizeof_T: 2,
+                expr: `// st_16x16_swizzled bf16
+const swizzle_mask = ((offset % 512) >> 7) << 3;
+return offset ^ swizzle_mask;`
+            },
+            'st_32x32': {
+                rows: 32, cols: 32, sizeof_T: 2,
+                expr: `// st_32x32 bf16: 双重 swizzle
+const first_swizzle = ((offset % 1024) >> 9) << 5;
+const second_swizzle = ((offset % 2048) >> 10) << 4;
+return offset ^ first_swizzle ^ second_swizzle;`
+            },
+            'st_16x32': {
+                rows: 16, cols: 32, sizeof_T: 2,
+                expr: `// st_16x32 bf16
+const swizzle_mask = ((offset % 1024) >> 9) << 5;
+return offset ^ swizzle_mask;`
+            },
+            'st_32x16': {
+                rows: 32, cols: 16, sizeof_T: 2,
+                expr: `// st_32x16 bf16
+const swizzle_mask = ((offset % 1024) >> 9) << 4;
+return offset ^ swizzle_mask;`
+            },
+            'st_8x32': {
+                rows: 8, cols: 32, sizeof_T: 2,
+                expr: `// st_8x32: 无 swizzle
+return offset;`
+            },
+            'st_16x128': {
+                rows: 16, cols: 128, sizeof_T: 1,
+                expr: `// st_16x128 fp8
+const swizzle_mask = ((offset % 2048) >> 8) << 4;
+return offset ^ swizzle_mask;`
+            },
+            'no_swizzle': {
+                rows: 16, cols: 32, sizeof_T: 2,
+                expr: `// 无 swizzle - 直接返回原始偏移
+return offset;`
+            }
+        };
+        
+        // 生成 bank 颜色 (红色到蓝色渐变)
+        function generateBankColors(numBanks) {
+            const colors = [];
+            for (let i = 0; i < numBanks; i++) {
+                // 从红色 (0°) 渐变到蓝色 (240°)
+                const hue = (i / (numBanks - 1)) * 240;
+                const sat = 70;
+                const light = 50;
+                colors.push(`hsl(${hue}, ${sat}%, ${light}%)`);
+            }
+            return colors;
+        }
+        
+        // 计算 bank ID
+        function getBank(byteOffset, numBanks, bankWidth) {
+            return Math.floor(byteOffset / bankWidth) % numBanks;
+        }
+        
+        // 执行 swizzle 表达式
+        function executeSwizzle(expr, offset, r, c, cols, sizeof_T) {
+            try {
+                const func = new Function('offset', 'r', 'c', 'cols', 'sizeof_T', expr);
+                return func(offset, r, c, cols, sizeof_T);
+            } catch (e) {
+                console.error('Swizzle expression error:', e);
+                return offset;
+            }
+        }
+        
+        // 分析 bank 冲突
+        function analyzeBankConflicts(bankGrid, numBanks) {
+            const rows = bankGrid.length;
+            const cols = bankGrid[0].length;
+            
+            // 分析每列的 bank 使用情况
+            let totalConflicts = 0;
+            let maxConflictPerCol = 0;
+            const bankUsagePerCol = [];
+            
+            for (let c = 0; c < cols; c++) {
+                const bankCount = {};
+                for (let r = 0; r < rows; r++) {
+                    const bank = bankGrid[r][c];
+                    bankCount[bank] = (bankCount[bank] || 0) + 1;
+                }
+                
+                let colConflicts = 0;
+                for (const count of Object.values(bankCount)) {
+                    if (count > 1) {
+                        colConflicts += count - 1;
+                    }
+                }
+                totalConflicts += colConflicts;
+                maxConflictPerCol = Math.max(maxConflictPerCol, colConflicts);
+                bankUsagePerCol.push(Object.keys(bankCount).length);
+            }
+            
+            // 统计唯一 bank 使用数
+            const allBanks = new Set();
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    allBanks.add(bankGrid[r][c]);
+                }
+            }
+            
+            return {
+                totalConflicts,
+                maxConflictPerCol,
+                uniqueBanks: allBanks.size,
+                avgBanksPerCol: (bankUsagePerCol.reduce((a, b) => a + b, 0) / cols).toFixed(1)
+            };
+        }
+        
+        // 渲染网格
+        function renderGrid(containerId, bankGrid, colors) {
+            const container = document.getElementById(containerId);
+            const rows = bankGrid.length;
+            const cols = bankGrid[0].length;
+            
+            let html = `<div class="tile-grid" style="grid-template-columns: 28px repeat(${cols}, 32px);">`;
+            
+            // 列头
+            html += `<div class="cell header-cell"></div>`;
+            for (let c = 0; c < cols; c++) {
+                html += `<div class="cell header-cell">c${c}</div>`;
+            }
+            
+            // 数据行
+            for (let r = 0; r < rows; r++) {
+                html += `<div class="cell header-cell">r${r}</div>`;
+                for (let c = 0; c < cols; c++) {
+                    const bank = bankGrid[r][c];
+                    const color = colors[bank % colors.length];
+                    html += `<div class="cell" style="background: ${color};" title="(${r},${c}) → Bank ${bank}">
+                        <span class="coords">${r},${c}</span>
+                        ${bank}
+                    </div>`;
+                }
+            }
+            
+            html += '</div>';
+            container.innerHTML = html;
+        }
+        
+        // 渲染统计信息
+        function renderStats(containerId, stats, isSwizzled) {
+            const container = document.getElementById(containerId);
+            const conflictLevel = stats.totalConflicts === 0 ? 'none' : 
+                                  stats.totalConflicts < 10 ? 'low' : 'high';
+            
+            container.innerHTML = `
+                <div class="stats-row">
+                    <span><span class="conflict-indicator conflict-${conflictLevel}"></span>列方向冲突总数</span>
+                    <span><strong>${stats.totalConflicts}</strong></span>
+                </div>
+                <div class="stats-row">
+                    <span>单列最大冲突</span>
+                    <span>${stats.maxConflictPerCol}</span>
+                </div>
+                <div class="stats-row">
+                    <span>使用的唯一 Bank 数</span>
+                    <span>${stats.uniqueBanks}</span>
+                </div>
+                <div class="stats-row">
+                    <span>每列平均 Bank 数</span>
+                    <span>${stats.avgBanksPerCol}</span>
+                </div>
+            `;
+        }
+        
+        // 渲染图例
+        function renderLegend(numBanks, colors) {
+            const container = document.getElementById('legend');
+            let html = '';
+            
+            // 只显示前 32 个 bank 的颜色（太多会太长）
+            const showCount = Math.min(numBanks, 32);
+            for (let i = 0; i < showCount; i++) {
+                html += `<div class="legend-item">
+                    <div class="legend-color" style="background: ${colors[i]};"></div>
+                    <span>Bank ${i}</span>
+                </div>`;
+            }
+            
+            if (numBanks > 32) {
+                html += `<div class="legend-item"><span>... (共 ${numBanks} 个 banks)</span></div>`;
+            }
+            
+            container.innerHTML = html;
+        }
+        
+        // 加载预设
+        function loadPreset(name) {
+            const preset = presets[name];
+            document.getElementById('rows').value = preset.rows;
+            document.getElementById('cols').value = preset.cols;
+            document.getElementById('sizeof_T').value = preset.sizeof_T;
+            document.getElementById('swizzleExpr').value = preset.expr;
+            
+            // 更新按钮状态
+            document.querySelectorAll('.preset-buttons button').forEach(btn => {
+                btn.classList.toggle('active', btn.textContent === name);
+            });
+            
+            updateVisualization();
+        }
+        
+        // 更新可视化
+        function updateVisualization() {
+            const rows = parseInt(document.getElementById('rows').value);
+            const cols = parseInt(document.getElementById('cols').value);
+            const sizeof_T = parseInt(document.getElementById('sizeof_T').value);
+            const numBanks = parseInt(document.getElementById('numBanks').value);
+            const bankWidth = parseInt(document.getElementById('bankWidth').value);
+            const swizzleExpr = document.getElementById('swizzleExpr').value;
+            
+            const colors = generateBankColors(numBanks);
+            
+            // 计算原始和 swizzle 后的 bank 分布
+            const originalBanks = [];
+            const swizzledBanks = [];
+            
+            for (let r = 0; r < rows; r++) {
+                const origRow = [];
+                const swizRow = [];
+                
+                for (let c = 0; c < cols; c++) {
+                    const offset = sizeof_T * (r * cols + c);
+                    const swizzledOffset = executeSwizzle(swizzleExpr, offset, r, c, cols, sizeof_T);
+                    
+                    origRow.push(getBank(offset, numBanks, bankWidth));
+                    swizRow.push(getBank(swizzledOffset, numBanks, bankWidth));
+                }
+                
+                originalBanks.push(origRow);
+                swizzledBanks.push(swizRow);
+            }
+            
+            // 渲染
+            renderGrid('originalGrid', originalBanks, colors);
+            renderGrid('swizzledGrid', swizzledBanks, colors);
+            
+            const origStats = analyzeBankConflicts(originalBanks, numBanks);
+            const swizStats = analyzeBankConflicts(swizzledBanks, numBanks);
+            
+            renderStats('originalStats', origStats, false);
+            renderStats('swizzledStats', swizStats, true);
+            
+            renderLegend(numBanks, colors);
+        }
+        
+        // 初始化
+        updateVisualization();
+    </script>
+</body>
+</html>
+

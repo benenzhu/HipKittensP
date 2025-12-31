@@ -63,10 +63,14 @@ __device__ inline static void load(RT &dst, const ST &src) {
 
                     const int idx = k * RT::base_tile_stride / packing;
 
+                    static_assert(register_subtiles_per_shared_subtile_col == 1, "reg_subtile_col");
+                    static_assert(register_subtiles_per_shared_subtile_row == 1, "reg_subtile_row");
                     #pragma unroll
                     for (int ii = 0; ii < ST::subtiles_per_col; ii++) {
+                        static_assert(ST::subtiles_per_col == 4, "subtiles_per_col");
                         #pragma unroll
                         for (int jj = 0; jj < ST::subtiles_per_row; jj++) {
+                            static_assert(ST::subtiles_per_row == 2, "subtiles_per_row");
                             const int shared_subtile_id = ii * ST::underlying_subtiles_per_row + jj;
                             const int offset = shared_subtile_id * ST::underlying_subtile_bytes;
 

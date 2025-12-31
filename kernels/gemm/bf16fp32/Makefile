@@ -29,7 +29,7 @@ ILDFLAGS  :=
 ILDLIBS   :=
 
 CXXFLAGS ?= -Wall -Wextra
-CXXFLAGS := -w
+CXXFLAGS := -Wdeprecated-declarations -Wdeprecated-declarations
 
 ICXXFLAGS += $(CXXFLAGS) 
 ICPPFLAGS += $(CPPFLAGS)
