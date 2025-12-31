@@ -40,6 +40,10 @@ using _gl_C = gl<bf16, -1, -1, -1, -1>;
 
 using G = kittens::group<NUM_WARPS>;
 
+
+__device__ bool thread0(){
+    return threadIdx.x == 0 && blockIdx.x == 0 && blockIdx.y==0 && blockIdx.z == 0 && threadIdx.y == 0; 
+}
 struct micro_globals {
     _gl_A a;
     _gl_B b;
@@ -109,33 +113,36 @@ void micro_tk(const micro_globals g, int M, int N, int K) {
     /********** Readfirstlane hoisting **********/
     const bf16* a_base = (bf16*)&g.a[{0, 0, 0, 0}];
     const bf16* b_base = (bf16*)&g.b[{0, 0, 0, 0}];
-    const int a_row_stride = g.a.template stride<2>() * sizeof(bf16);
-    const int b_row_stride = g.b.template stride<2>() * sizeof(bf16);
-    i32x4 a_srsrc_base = make_srsrc(a_base, M * a_row_stride, a_row_stride);
-    i32x4 b_srsrc_base = make_srsrc(b_base, N * b_row_stride, b_row_stride);
+    const int a_row_stride__2K = g.a.template stride<2>() * sizeof(bf16);
+    const int b_row_stride__2K = g.b.template stride<2>() * sizeof(bf16);
+    // if(thread0()){
+    //     printf("")
+    // }
+    i32x4 a_srsrc_base = make_srsrc(a_base, M * a_row_stride__2K, a_row_stride__2K);
+    i32x4 b_srsrc_base = make_srsrc(b_base, N * b_row_stride__2K, b_row_stride__2K);
 
     const int wid = warpid() % NUM_WARPS;
-    constexpr int elem_per_warp = (16 / sizeof(bf16)) * kittens::WARP_THREADS;
-    uint32_t a_lds_00 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[0][0].data[0]) + wid * elem_per_warp * sizeof(bf16)));
-    uint32_t a_lds_01 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[0][1].data[0]) + wid * elem_per_warp * sizeof(bf16)));
-    uint32_t a_lds_10 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[1][0].data[0]) + wid * elem_per_warp * sizeof(bf16)));
-    uint32_t a_lds_11 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[1][1].data[0]) + wid * elem_per_warp * sizeof(bf16)));
+    constexpr int elem_per_warp__512 = (16 / sizeof(bf16)) * kittens::WARP_THREADS;
+    uint32_t a_lds_00 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[0][0].data[0]) + wid * elem_per_warp__512 * sizeof(bf16))); // TODO: what use?
+    uint32_t a_lds_01 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[0][1].data[0]) + wid * elem_per_warp__512 * sizeof(bf16)));
+    uint32_t a_lds_10 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[1][0].data[0]) + wid * elem_per_warp__512 * sizeof(bf16)));
+    uint32_t a_lds_11 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[1][1].data[0]) + wid * elem_per_warp__512 * sizeof(bf16)));
 
-    uint32_t b_lds_00 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[0][0].data[0]) + wid * elem_per_warp * sizeof(bf16)));
-    uint32_t b_lds_01 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[0][1].data[0]) + wid * elem_per_warp * sizeof(bf16)));
-    uint32_t b_lds_10 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[1][0].data[0]) + wid * elem_per_warp * sizeof(bf16)));
-    uint32_t b_lds_11 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[1][1].data[0]) + wid * elem_per_warp * sizeof(bf16)));
+    uint32_t b_lds_00 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[0][0].data[0]) + wid * elem_per_warp__512 * sizeof(bf16)));
+    uint32_t b_lds_01 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[0][1].data[0]) + wid * elem_per_warp__512 * sizeof(bf16)));
+    uint32_t b_lds_10 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[1][0].data[0]) + wid * elem_per_warp__512 * sizeof(bf16)));
+    uint32_t b_lds_11 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[1][1].data[0]) + wid * elem_per_warp__512 * sizeof(bf16)));
     /*****************************************/
 
     int tic = 0;
     int toc = 1;
 
     using T = typename ST_A_128_64__16_32::dtype;
-    constexpr int bytes_per_thread = ST_A_128_64__16_32::underlying_subtile_bytes_per_thread;
-    constexpr int bytes_per_memcpy = bytes_per_thread * NUM_THREADS;
-    constexpr int memcpy_per_tile = BLOCK_SIZE * K_STEP__64 * sizeof(T) / bytes_per_memcpy;
-    uint32_t swizzled_offsets_A[memcpy_per_tile/2];
-    uint32_t swizzled_offsets_B[memcpy_per_tile/2];
+    constexpr int bytes_per_thread___16 = ST_A_128_64__16_32::underlying_subtile_bytes_per_thread;
+    constexpr int bytes_per_memcpy___8192 = bytes_per_thread___16 * NUM_THREADS;
+    constexpr int memcpy_per_tile___64 = BLOCK_SIZE * K_STEP__64 * sizeof(T) / bytes_per_memcpy___8192;
+    uint32_t swizzled_offsets_A[memcpy_per_tile___64/2];
+    uint32_t swizzled_offsets_B[memcpy_per_tile___64/2];
     G::prefill_swizzled_offsets(As[0][0], g.a, swizzled_offsets_A);
     G::prefill_swizzled_offsets(Bs[0][0], g.b, swizzled_offsets_B);
     __syncthreads();

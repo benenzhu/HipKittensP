@@ -74,7 +74,7 @@ __device__ inline i32x4 make_srsrc(const void* ptr, uint32_t range_bytes, uint32
     std::uint64_t  as_u64 = static_cast<std::uint64_t>(as_int);    // widen if host is 32-bit
     buffer_resource rsrc = make_buffer_resource(as_u64, range_bytes, 0x110000);
 
-    row_stride_bytes &= 0x3FFF;
+    row_stride_bytes &= 0x3FFF; // 0x10 = 16 0x100 = 256 0x1000 = 4096 0x4000 = 16384
     if (row_stride_bytes) {
         // - The swizzle stride lives in bits 13:0 of word2.
         //   Max value = 0x3FFF (8 KiB – one cache line per bank).
