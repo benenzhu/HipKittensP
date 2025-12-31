@@ -314,6 +314,71 @@ __device__ __forceinline__ void load(ST& dst, const GL& src, const COORD& idx,
         lds_cur += bytes_per_memcpy;
     }
 }
+
+// template<int axis, bool assume_aligned, ducks::st::all ST, ducks::gl::all GL, ducks::coord::tile COORD = coord<ST>, int N_THREADS = WARP_THREADS>
+__attribute__((always_inline))
+__attribute__((device)) inline __attribute__((always_inline)) void load2(st<__hip_bfloat16, 128, 64, ducks::st_shape::st_16x32> & dst, const gl<__hip_bfloat16, -1, -1, -1, -1>& src, const coord<st<__hip_bfloat16, 128, 64, ducks::st_shape::st_16x32>>& idx,
+                                const uint32_t* __restrict__ swizzled_offsets,
+                                i32x4 SRD,
+                                const void* base_ptr, const uint32_t lds_base)
+{
+    using ST = st<__hip_bfloat16, 128, 64, ducks::st_shape::st_16x32>;
+    using T = typename ST::dtype;
+    constexpr int N_THREADS = WARP_THREADS;
+    constexpr int axis = 2;
+    constexpr bool assume_aligned = false;
+    using COORD = coord<ST>;
+    static_assert(sizeof(T) == 2 || sizeof(T) == 1, "only supporting 16 and 8-bit dtypes");
+
+    constexpr int bytes_per_thread = 16;
+    constexpr int bytes_per_memcpy = bytes_per_thread * N_THREADS;
+    constexpr int memcpy_per_tile = (ST::rows * ST::cols * sizeof(T)) / bytes_per_memcpy;
+    static_assert(bytes_per_memcpy % 16 == 0, "LDS bump must be 16-aligned");
+
+    constexpr int elem_per_thread = bytes_per_thread / sizeof(T);
+    constexpr int elem_per_warp = elem_per_thread * kittens::WARP_THREADS;
+
+    // ---- compute per-tile base pointer and scalar offset (SOFF) ----
+    coord<> unit_coord = idx.template unit_coord<axis, 3>();
+    T* __restrict__ gptr = (T*)&src[unit_coord];
+
+    uint32_t SOFF = to_sgpr_u32(static_cast<uint32_t>(
+    reinterpret_cast<const char*>(gptr) - reinterpret_cast<const char*>(base_ptr)
+    ));
+
+    // // ---- LDS base (byte address) as SGPR (wave-uniform) ----
+    // const int num_warps = N_THREADS / kittens::WARP_THREADS;
+    // const int wid = warpid() % num_warps;
+    // uint32_t lds_base = to_sgpr_u32(static_cast<uint32_t>(
+    // reinterpret_cast<uintptr_t>(&dst.data[0]) + wid * elem_per_warp * sizeof(T)
+    // ));
+
+    // ---- SGPR cursor we bump each iteration (no new readfirstlane) ----
+    uint32_t lds_cur = lds_base;
+    asm volatile("" : "+s"(lds_cur));
+
+#pragma unroll
+    for (int i = 0; i < memcpy_per_tile; ++i) {
+        int32_t lds_byte = lds_cur; // still SGPR
+        asm volatile("" : "+s"(lds_byte)); // keep it SGPR at the use
+
+        asm volatile("s_mov_b32 m0, %0" :: "s"(lds_byte));
+        llvm_amdgcn_raw_buffer_load_lds(
+            SRD,
+            (as3_uint32_ptr)0,
+            16,
+            swizzled_offsets[i],
+            SOFF,
+            0,
+            static_cast<int>(coherency::cache_all)
+        );
+
+        // SGPR bump (compiler emits s_add_u32)
+        lds_cur += bytes_per_memcpy;
+    }
+}
+
+
 template<ducks::st::all ST, ducks::gl::all GL, ducks::coord::tile COORD=coord<ST>>
 __device__ static inline void load(ST &dst, const GL &src, const COORD &idx, const uint32_t* __restrict__ swizzled_offsets, i32x4 srd, const void* base_ptr, uint32_t lds_base) {
     load<2, false, ST, GL, COORD, WARP_THREADS>(dst, src, idx, swizzled_offsets, srd, base_ptr, lds_base);
