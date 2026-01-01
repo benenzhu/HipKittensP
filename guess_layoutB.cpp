@@ -25,11 +25,11 @@ __global__ void guess_fp16(float* d_C) {
 
     v8bf16 a;
     v8bf16 b;
-    if(threadIdx.x == 0){
+    // if(threadIdx.x == 0){
         for(int i = 0; i < 8; i++){
             a[i] = i + 1;
         }
-    }
+    // }
     for(int i = 0; i < 8; i++){
         b[i] = 1;
     }
@@ -39,7 +39,7 @@ __global__ void guess_fp16(float* d_C) {
     for(int i = 0; i < 4; i++){
         c[i] = 0;
     }
-    mfma_inst(a, b, c);
+    c = mfma_inst(a, b, c);
     __syncthreads();
     for(int i = 0; i < 4; i++){
         d_C[threadIdx.x * 4 + i] = c[i];
@@ -53,7 +53,7 @@ __global__ void guess_fp16(float* d_C) {
             printf("%.2lf ", float(b[i]));
         }
         printf("\n");
-        for(int i = 0; i < 8; i++){
+        for(int i = 0; i < 4; i++){
             printf("%.2lf ", c[i]);
         }
         printf("\n");
