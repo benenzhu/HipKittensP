@@ -44,6 +44,10 @@ __global__ void guess_fp16(float* d_C) {
     for(int i = 0; i < 4; i++){
         d_C[threadIdx.x * 4 + i] = ((float*)&c)[i];
     }
+    
+    if(threadIdx.x == 0){
+        d_C[1] = 1;
+    }
 
 }
 
