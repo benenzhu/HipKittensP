@@ -187,7 +187,6 @@ void micro_tk(const micro_globals g, int M, int N, int K) {
     asm volatile("s_waitcnt vmcnt(6)");
     __builtin_amdgcn_s_barrier();
 
-    #pragma unroll
     for (int tile = 0; tile < num_tiles - 2; tile+=2) {
 
         auto st_subtile_b = subtile_inplace<HALF_REG_BLOCK_N__32, K_STEP__64>(Bs__128_64__16_32[0][0], {warp_col, 0});

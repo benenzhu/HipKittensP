@@ -46,7 +46,11 @@ __global__ void guess_fp16(float* d_C) {
     c = mfma_inst(a, b, c);
     __syncthreads();
     for(int i = 0; i < 4; i++){
-        d_C[threadIdx.x * 4 + i] = c[i];
+        const int row = threadIdx.x / 16 * 4;
+        const int col = threadIdx.x % 16;
+        
+        
+        d_C[(row + i) * 16 + col] = c[i];
     }
     if(threadIdx.x == 0){
         for(int i = 0; i < 8; i++){
