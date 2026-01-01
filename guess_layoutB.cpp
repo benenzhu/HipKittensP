@@ -34,8 +34,14 @@ __global__ void guess_fp16(float* d_C) {
             a[i] = 0;
         }
     }
-    for(int i = 0; i < 8; i++){
-        b[i] = 1;
+    if (threadIdx.x == 0){
+        for(int i = 0; i < 8; i++){
+            b[i] = 1;
+        }
+    }else{
+        for(int i = 0; i < 8; i++){
+            b[i] = 0;
+        }
     }
 
     
