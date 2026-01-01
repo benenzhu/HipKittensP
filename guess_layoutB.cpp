@@ -25,7 +25,7 @@ __global__ void guess_fp16(float* d_C) {
 
     v8bf16 a;
     v8bf16 b;
-    if(threadIdx.x == 0){
+    if(threadIdx.x == 16){
         for(int i = 0; i < 8; i++){
             a[i] = i + 1;
         }
@@ -34,7 +34,7 @@ __global__ void guess_fp16(float* d_C) {
             a[i] = 0;
         }
     }
-    if (threadIdx.x == 0){
+    if (threadIdx.x == 0 || true){
         for(int i = 0; i < 8; i++){
             b[i] = 1;
         }
