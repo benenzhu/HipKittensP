@@ -1,11 +1,10 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_bf16.h>
+#include <hip/hip_bfloat16.h>
+#include <hip/hip_fp16.h>
 
 
-// Input vector: 4 VGPRs = 128 bits. Holds 8 x bf16.
-typedef float v4f32 __attribute__((vector_size(16)));
-typedef unsigned short v8bf16 __attribute__((vector_size(16))); // Representation
-
+typedef __bf16 v8bf16 __attribute__((vector_size(16))) ; // Representation
 // Output vector: 4 VGPRs = 128 bits. Holds 4 x f32.
 typedef float v4f32_out __attribute__((vector_size(16)));
 
@@ -24,40 +23,40 @@ __global__ void guess_fp16(float* d_C) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     
 
-    v8bf16 a[8];
-    v8bf16 b[8];
+    v8bf16 a;
+    v8bf16 b;
     if(threadIdx.x == 0){
         for(int i = 0; i < 8; i++){
-            ((__hip_bfloat16*)a)[i] = i + 1;
+            a[i] = i + 1;
         }
     }
     for(int i = 0; i < 8; i++){
-        ((__hip_bfloat16*)b)[i] = 1;
+        b[i] = 1;
     }
 
     
     v4f32_out c;
     for(int i = 0; i < 4; i++){
-        ((float*)&c)[i] = 0;
+        c[i] = 0;
     }
-    mfma_inst(reinterpret_cast<v8bf16>(*a), reinterpret_cast<v8bf16>(*b), c);
+    mfma_inst(a, b, c);
     __syncthreads();
     if(threadIdx.x == 0){
         for(int i = 0; i < 8; i++){
-            printf("%.2lf ", float(((__hip_bfloat16*)a)[i]));
+            printf("%.2lf ", float(a[i]));
         }
         printf("\n");
         for(int i = 0; i < 8; i++){
-            printf("%.2lf ", float(((__hip_bfloat16*)b)[i]));
+            printf("%.2lf ", float(b[i]));
         }
         printf("\n");
         for(int i = 0; i < 8; i++){
-            printf("%.2lf ", ((float*)&c)[i]);
+            printf("%.2lf ", c[i]);
         }
         printf("\n");
     }
     for(int i = 0; i < 4; i++){
-        d_C[threadIdx.x * 4 + i] = ((float*)&c)[i];
+        d_C[threadIdx.x * 4 + i] = c[i];
     }
     
     // if(threadIdx.x == 0){
