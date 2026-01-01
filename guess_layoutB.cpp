@@ -29,6 +29,10 @@ __global__ void guess_fp16(float* d_C) {
         for(int i = 0; i < 8; i++){
             a[i] = i + 1;
         }
+    }else{
+        for(int i = 0; i < 8; i++){
+            a[i] = 0;
+        }
     }
     for(int i = 0; i < 8; i++){
         b[i] = 1;
