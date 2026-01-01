@@ -54,6 +54,7 @@ __global__ void guess_fp16(float* d_C) {
         for(int i = 0; i < 8; i++){
             printf("%.2lf ", ((float*)&c)[i]);
         }
+        printf("\n");
     }
     for(int i = 0; i < 4; i++){
         d_C[threadIdx.x * 4 + i] = ((float*)&c)[i];
