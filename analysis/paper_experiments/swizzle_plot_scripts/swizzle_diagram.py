@@ -169,8 +169,8 @@ def save_swizzle_diagram(filename, rows=16, cols=16, mapping=None, dpi=300,
 
 def parse_args():
     p = argparse.ArgumentParser(description="Generate memory swizzle diagrams.")
-    p.add_argument("--rows", type=int, default=16, help="Number of rows (default: 16)")
-    p.add_argument("--cols", type=int, default=16, help="Number of columns (default: 16)")
+    p.add_argument("--rows", type=int, default=64, help="Number of rows (default: 16)")
+    p.add_argument("--cols", type=int, default=32, help="Number of columns (default: 16)")
     p.add_argument("--out", type=str, default="swizzle_16x16.png", help="Output filename (PNG)")
     p.add_argument("--perm", type=str, default=None,
                    help="Comma-separated list of per-column labels (length == cols)")
@@ -182,7 +182,7 @@ def parse_args():
                    help="RGB multiplier for darkened cells (0..1, default 0.6)")
     p.add_argument("--palette", type=str, default="turbo",
                    help="Matplotlib palette name (e.g., turbo, viridis, plasma)")
-    p.add_argument("--font-size", type=int, default=16,
+    p.add_argument("--font-size", type=int, default=5,
                    help="Font size for cell labels (default: 16)")
     p.add_argument("--compare", action="store_true",
                    help="Render side-by-side: default mask (left) vs swizzled (right)")

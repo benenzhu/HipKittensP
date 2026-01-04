@@ -158,6 +158,68 @@ struct st_subtile {
     using row_vec = sv<dtype, cols>;
 };
 
+namespace zz2 {
+using _ST = kittens::st<__hip_bfloat16, 128, 64, kittens::ducks::st_shape::st_16x32>;
+constexpr int _subtile_rows = 32;
+constexpr int _subtile_cols = 64;
+// template<
+//     typename _ST,
+//     int _subtile_rows,
+//     int _subtile_cols
+// >
+struct st_subtile {
+    using identifier = ducks::st::identifier; // i quack like an st, gcc will never know the difference
+    using ST = _ST;
+    using T = ST::T;
+    using T2 = ST::T2;
+    using dtype = T; ///< Data type of the elements in the tile.
+    using shape = ST::shape;
+
+    static constexpr int underlying_rows              = ST::underlying_rows;
+    static constexpr int underlying_cols              = ST::underlying_cols;
+    static constexpr int underlying_num_elements      = ST::underlying_num_elements;
+
+    static constexpr int underlying_subtile_cols      = ST::underlying_subtile_cols;
+    static constexpr int underlying_subtile_row_bytes = ST::underlying_subtile_row_bytes;
+    static constexpr int underlying_subtile_rows      = ST::underlying_subtile_rows;
+    static constexpr int underlying_subtile_elements  = ST::underlying_subtile_elements;
+    static constexpr int underlying_subtile_bytes     = ST::underlying_subtile_bytes;
+    static constexpr int underlying_subtile_bytes_per_thread = ST::underlying_subtile_bytes_per_thread;
+    
+    static constexpr int underlying_subtiles_per_row  = ST::underlying_subtiles_per_row;
+    static constexpr int underlying_subtiles_per_col  = ST::underlying_subtiles_per_col;
+
+    static constexpr int rows                = _subtile_rows;
+    static constexpr int cols                = _subtile_cols;
+    static constexpr int num_elements        = rows * cols;
+
+    static constexpr int subtiles_per_row    = cols / underlying_subtile_cols;
+    static constexpr int subtiles_per_col    = rows / underlying_subtile_rows;
+
+    dtype *data;
+    int row_offset, col_offset;
+
+    __device__ st_subtile(ST &src, int2 rowcol) {
+        row_offset = rowcol.x * rows;
+        col_offset = rowcol.y * cols;
+        const int subtile_row_offset = row_offset / underlying_subtile_rows;
+        const int subtile_col_offset = col_offset / underlying_subtile_cols;
+        const int subtile_id = subtile_row_offset * underlying_subtiles_per_row + subtile_col_offset;
+        const int subtile_offset = subtile_id * underlying_subtile_elements;
+        data = &src.data[subtile_offset];
+    }
+
+    __device__ __forceinline__ static const uint32_t swizzle(int2 coord) {
+        return ST::swizzle(coord);
+    }
+
+    // vector types
+    using col_vec = sv<dtype, rows>;
+    using row_vec = sv<dtype, cols>;
+};
+    
+}
+
 /* ----------  CONCEPTS  ---------- */
 
 namespace ducks {
