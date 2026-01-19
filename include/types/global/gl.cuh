@@ -42,35 +42,46 @@ struct gl {
 
     static constexpr int __b__ = b, __d__ = d, __r__ = r, __c__ = c; // Not to be touched by the user.
 
+    #ifndef hip_rtc
     ducks::gl::make_dim_t<b> batch_internal;
     ducks::gl::make_dim_t<d> depth_internal;
     ducks::gl::make_dim_t<r> rows_internal;
     ducks::gl::make_dim_t<c> cols_internal;
+    #endif
 
     template <int B=__b__> __device__ __host__ static constexpr std::enable_if_t<(B > 0), int> batch() { return B; }
-    template <int B=__b__> __device__ __host__ std::enable_if_t<(B == -1), int> batch() const { return batch_internal; }
     template <int D=__d__> __device__ __host__ static constexpr std::enable_if_t<(D > 0), int> depth() { return D; }
-    template <int D=__d__> __device__ __host__ std::enable_if_t<(D == -1), int> depth() const { return depth_internal; }
     template <int R=__r__> __device__ __host__ static constexpr std::enable_if_t<(R > 0), int> rows() { return R; }
-    template <int R=__r__> __device__ __host__ std::enable_if_t<(R == -1), int> rows() const { return rows_internal; }
     template <int C=__c__> __device__ __host__ static constexpr std::enable_if_t<(C > 0), int> cols() { return C; }
+    #ifndef hip_rtc
+    template <int B=__b__> __device__ __host__ std::enable_if_t<(B == -1), int> batch() const { return batch_internal; }
+    template <int D=__d__> __device__ __host__ std::enable_if_t<(D == -1), int> depth() const { return depth_internal; }
+    template <int R=__r__> __device__ __host__ std::enable_if_t<(R == -1), int> rows() const { return rows_internal; }
     template <int C=__c__> __device__ __host__ std::enable_if_t<(C == -1), int> cols() const { return cols_internal; }
+    #endif
 
-    detail::descriptor_dict<TMA_Types...> tma_descs;
+    // detail::descriptor_dict<TMA_Types...> tma_descs;
 
+    #ifndef hip_rtc
     __host__ inline gl(T *_data,
                         ducks::gl::make_arg_t<b> _batch,
                         ducks::gl::make_arg_t<d> _depth,
                         ducks::gl::make_arg_t<r> _rows,
                         ducks::gl::make_arg_t<c> _cols) :
             raw_ptr(_data), batch_internal(_batch), depth_internal(_depth), rows_internal(_rows), cols_internal(_cols) {
-        tma_descs = detail::descriptor_dict<TMA_Types...>(raw_ptr, batch_internal, depth_internal, rows_internal, cols_internal);
+        // tma_descs = detail::descriptor_dict<TMA_Types...>(raw_ptr, batch_internal, depth_internal, rows_internal, cols_internal);
     }
+    #endif
     __host__ __device__ inline gl(const gl &other) :
-            raw_ptr(other.raw_ptr), batch_internal(other.batch_internal), depth_internal(other.depth_internal), rows_internal(other.rows_internal), cols_internal(other.cols_internal), tma_descs(other.tma_descs) {}
+            raw_ptr(other.raw_ptr)
+            #ifndef hip_rtc
+            , batch_internal(other.batch_internal), depth_internal(other.depth_internal), rows_internal(other.rows_internal), cols_internal(other.cols_internal)
+            #endif
+            {}
     __device__ inline T& operator[](const coord<ducks::default_type> &idx) const { // yes I am abusing the const qualifier here a bit.
         return raw_ptr[((idx.b*depth() + idx.d)*rows() + idx.r)*cols() + idx.c];
     }
+    __device__ inline gl(T *_data):raw_ptr(_data){};
     __device__ inline int idx(const coord<ducks::default_type> &idx) const {
         return ((idx.b*depth() + idx.d)*rows() + idx.r)*cols() + idx.c;
     }

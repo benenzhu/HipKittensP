@@ -1,5 +1,6 @@
 #pragma once
 
+#ifndef hip_rtc
 #include "../ops/ops.cuh"
 #include <iostream>
 
@@ -16,3 +17,4 @@ void check(T err, char const* const func, char const* const file,
         //std::exit(EXIT_FAILURE);
     }
 }
+#endif

@@ -1,5 +1,6 @@
 #pragma once
 
+#ifndef hip_rtc
 #include "util.cuh"
 #include <pybind11/pybind11.h>
 
@@ -72,3 +73,5 @@ template<auto function, typename TGlobal> static void bind_function(auto m, auto
 
 } // namespace py
 } // namespace kittens
+
+#endif
