@@ -6,6 +6,8 @@
 #pragma once
 
 #include <concepts>
+#include <hip/amd_detail/host_defines.h>
+#include <amd_detail/amd_hip_vector_types.h>
 
 namespace kittens {
 namespace ducks {
