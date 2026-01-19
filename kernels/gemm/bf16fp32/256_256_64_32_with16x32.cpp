@@ -146,10 +146,10 @@ void micro_tk(const micro_globals g, int M, int N, int K) {
     G::prefill_swizzled_offsets(As__128_64__16_32[0][0], g.a, swizzled_offsets_A);
     G::prefill_swizzled_offsets(Bs__128_64__16_32[0][0], g.b, swizzled_offsets_B);
     __syncthreads();
-    if(threadIdx.x == 0 && blockIdx.x == 0 && blockIdx.y==0){
-        printf("offsets_A: %d %d\n", swizzled_offsets_A[0], swizzled_offsets_A[1]);
-        printf("offsets_B: %d %d\n", swizzled_offsets_B[0], swizzled_offsets_B[1]);
-    }
+    // if(threadIdx.x == 0 && blockIdx.x == 0 && blockIdx.y==0){
+    //     printf("offsets_A: %d %d\n", swizzled_offsets_A[0], swizzled_offsets_A[1]);
+    //     printf("offsets_B: %d %d\n", swizzled_offsets_B[0], swizzled_offsets_B[1]);
+    // }
 
     // global_to_shared.cuh
     G::load(Bs__128_64__16_32[tic][0], g.b, {0, 0, col*2, 0}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds_00);
