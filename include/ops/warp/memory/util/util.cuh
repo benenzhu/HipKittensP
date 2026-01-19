@@ -5,9 +5,11 @@
 #pragma once
 
 #include "../../../../common/common.cuh"
+#ifndef hip_rtc
 #include <hip/hip_runtime.h>
 #include <hip/amd_detail/amd_hip_runtime.h>
 #include <hip/amd_detail/hip_ldg.h>
+#endif
 
 namespace kittens {
 

@@ -198,6 +198,7 @@ __device__ inline static void load(RT &dst, const ST &src) {
 }
 
 
+#ifdef see_code
 namespace zz2 {
 using RT = kittens::rt<__hip_bfloat16 /*_T*/, 32 /*_rows*/, 64/*_cols*/, kittens::ducks::rt_layout::row /*_layout*/, kittens::ducks::rt_shape::rt_shape<16, 32, 8> /*_shape*/>;
 using ST = const kittens::st_subtile<kittens::st<__hip_bfloat16, 128, 64, kittens::ducks::st_shape::st_16x32>, 32, 64>;
@@ -377,6 +378,7 @@ __device__ inline static void load(RT &dst, const ST &src) {
 }
 
 };
+#endif
 template<ducks::rt::col_layout RT, ducks::st::all ST>
 __device__ inline static void load(RT &dst, const ST &src) {
 

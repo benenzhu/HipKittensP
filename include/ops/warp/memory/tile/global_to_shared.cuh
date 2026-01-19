@@ -316,6 +316,7 @@ __device__ __forceinline__ void load(ST& dst, const GL& src, const COORD& idx,
 }
 
 // template<int axis, bool assume_aligned, ducks::st::all ST, ducks::gl::all GL, ducks::coord::tile COORD = coord<ST>, int N_THREADS = WARP_THREADS>
+#ifdef see_code2
 __attribute__((always_inline))
 __attribute__((device)) inline __attribute__((always_inline)) void load2(st<__hip_bfloat16, 128, 64, ducks::st_shape::st_16x32> & dst, const gl<__hip_bfloat16, -1, -1, -1, -1>& src, const coord<st<__hip_bfloat16, 128, 64, ducks::st_shape::st_16x32>>& idx,
                                 const uint32_t* __restrict__ swizzled_offsets,
@@ -377,6 +378,7 @@ __attribute__((device)) inline __attribute__((always_inline)) void load2(st<__hi
         lds_cur += bytes_per_memcpy;
     }
 }
+#endif
 
 
 template<ducks::st::all ST, ducks::gl::all GL, ducks::coord::tile COORD=coord<ST>>

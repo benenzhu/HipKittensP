@@ -108,12 +108,12 @@ template<typename T> struct constants {
      * @brief Positive infinity. Particularly useful for initializing before a min op.
      * @return Constexpr positive infinity with type T
      */
-    static __device__ inline constexpr T pos_infty() { return T{INFINITY}; } // I'll find a better way at some point but this appears to work.
+    static __device__ inline constexpr T pos_infty() { return T{__builtin_inff()}; } // I'll find a better way at some point but this appears to work.
     /**
      * @brief Negative infinity. Particularly useful for initializing before a max op.
      * @return Constexpr negative infinity with type T
      */
-    static __device__ inline constexpr T neg_infty() { return T{-INFINITY}; }
+    static __device__ inline constexpr T neg_infty() { return T{-__builtin_inff()}; }
 };
 template<> struct constants<float2> {
     static __device__ inline constexpr float2 zero()      { return float2{0.f, 0.f}; }

@@ -32,3 +32,6 @@ utils/__pycache__/
 !CMakeLists.txt
 tests/unit/unit_tests
 read*.cpp
+
+*.out
+.specstory
