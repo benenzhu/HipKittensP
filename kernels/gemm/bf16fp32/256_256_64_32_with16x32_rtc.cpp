@@ -57,9 +57,55 @@ __device__ bool thread0(){
     return threadIdx.x == 0 && blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0 && threadIdx.y == 0; 
 }
 
+__device__ static inline void wg_arange(auto &vec) {
+    #pragma unroll
+    for (int i = 0; i < vec.length; i++) {
+        float val = static_cast<float>(i) + (warpid() * vec.length);
+        vec.data[i] = val;
+    }
+}
 
 __global__ __launch_bounds__(NUM_THREADS, 2)
 void micro_tk(bf16* A, bf16* B, bf16* C) {
+    if(thread0()){
+        printf("zhuzhu\n");
+    }
+    
+    extern __shared__ alignment_dummy __shm[];
+    shared_allocator al((int*)&__shm[0]);
+    constexpr int ATTN_D = 128;
+    constexpr int CHUNK_SIZE = 64;
+
+
+    row_vec<st_fl<ATTN_D, CHUNK_SIZE, st_32x32_s>> (&q_decay) = al.allocate<row_vec<st_fl<ATTN_D, CHUNK_SIZE, st_32x32_s>>>();
+   
+    // decay in register
+    // 128 * 64 
+    row_vec<rt_fl<ATTN_D, CHUNK_SIZE, col_l, rt_32x32_s>> q_decay_rv; 
+    auto d = q_decay_rv;
+    zero(q_decay_rv);
+    
+    if(kittens::warpid() == 0){
+        wg_arange(q_decay);
+        __syncthreads();
+        if(thread0()){
+            for(int i = 0; i < 64; i++){
+                printf("q_decay: %lf\n", float(q_decay.data[i]));
+            }
+        }
+        load(q_decay_rv, q_decay);
+        // 256 个数
+        const auto a = q_decay_rv.data[0][0];
+        const auto a2 = q_decay_rv.data[1][0];
+        const auto a22 = q_decay_rv.reductions;
+        printf("threadIdx %d, value: %f value: %f\n", threadIdx.x, a, a2);
+        // printf("threadIdx %d, value: %f\n", threadIdx.x, q_decay_rv.data[1]);
+        constexpr auto size__2 = sizeof(q_decay_rv) / 4;
+
+    }
+
+    
+    return;
     // constexpr int now = sizeof(_gl_A);
     _gl_A2 g_a = _gl_A2(A);
     _gl_B2 g_b = _gl_B2(B);
@@ -67,8 +113,6 @@ void micro_tk(bf16* A, bf16* B, bf16* C) {
     if(thread0()){
 
     }
-    extern __shared__ alignment_dummy __shm[];
-    shared_allocator al((int*)&__shm[0]);
     using ST_A = st_bf<HALF_BLOCK_SIZE, K_STEP, st_16x32_s>;
     using ST_B = st_bf<HALF_BLOCK_SIZE, K_STEP, st_16x32_s>;
     ST_A (&As)[2][2] = al.allocate<ST_A, 2, 2>();

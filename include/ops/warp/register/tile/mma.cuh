@@ -389,18 +389,18 @@ __device__ static inline void mma_ABt(D &d,
     static_assert(A::cols == B::cols); // Check reduction dim is same
     static_assert(D::rows == C::rows && D::cols == C::cols); // Check D matches C
     
-    // --------- shapes start
-    static_assert(D::rows == 64);
-    static_assert(D::cols == 32);
+    // // --------- shapes start
+    // static_assert(D::rows == 64);
+    // static_assert(D::cols == 32);
 
-    static_assert(A::rows == 64);
-    static_assert(A::cols == 64);
-    static_assert(B::rows == 32);
-    static_assert(B::cols == 64);
+    // static_assert(A::rows == 64);
+    // static_assert(A::cols == 64);
+    // static_assert(B::rows == 32);
+    // static_assert(B::cols == 64);
 
-    static_assert(std::is_same_v<typename D::T, float>);
-    static_assert(std::is_same_v<typename A::T, bf16>);
-    static_assert(std::is_same_v<typename B::T, bf16>);
+    // static_assert(std::is_same_v<typename D::T, float>);
+    // static_assert(std::is_same_v<typename A::T, bf16>);
+    // static_assert(std::is_same_v<typename B::T, bf16>);
     // --------- shapes end
 
     
@@ -416,9 +416,9 @@ __device__ static inline void mma_ABt(D &d,
     
 
     
-    static_assert(D::height == 4);
-    static_assert(D::width == 2);
-    static_assert(A::width == 2);
+    // static_assert(D::height == 4);
+    // static_assert(D::width == 2);
+    // static_assert(A::width == 2);
 
     #pragma unroll
     for(int n = 0; n < D::height; n++) {

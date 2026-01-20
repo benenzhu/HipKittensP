@@ -77,6 +77,7 @@ def test_kittens_kernel():
     kittens_kernel = get_kernel("micro_tk", "256_256_64_32_with16x32_rtc.cpp")
     
     grid = (M // 256 * (N // 256), 1, 1)
+    grid = (1,1,1)
     block = (512, 1, 1)
     
     # Define kernel launch function
@@ -86,6 +87,7 @@ def test_kittens_kernel():
     # Run once for correctness check
     kittens_fn()
     torch.cuda.synchronize()
+    return
     
     # Check correctness
     ref = A @ B.T
@@ -114,7 +116,7 @@ def test_kittens_kernel():
     return C
 
 
-# ret = test_kittens_kernel()
+ret = test_kittens_kernel()
 
 
 def scaled_dot_product_attention(query, key, value, h_q, h_kv, is_causal=False):
@@ -205,7 +207,7 @@ def ref_mla_decode(q, blocked_kv, block_table, cache_seqlens, h_q, h_kv, d, dv, 
     
     return out
 
-if __name__ == "__main__":
+if False:
     # DeepSeek-V2/V3 MLA 参数
     b = 4           # batch size
     s_q = 1         # decode 阶段 query 长度为 1

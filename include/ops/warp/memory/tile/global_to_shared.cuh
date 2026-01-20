@@ -7,9 +7,9 @@
 
 #include "../../../../common/common.cuh"
 #include "../../../../types/types.cuh"
-#ifdef zz
-#include "ops/warp/memory/util/util.cuh"
-#endif
+// #ifdef zz
+// #include "ops/warp/memory/util/util.cuh"
+// #endif
 
 namespace kittens {
 

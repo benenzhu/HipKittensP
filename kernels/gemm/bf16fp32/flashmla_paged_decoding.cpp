@@ -8,7 +8,8 @@ constexpr int DPE = 64;           // rope dim
 constexpr int PAGE_BLOCK_SIZE = 64;  // paged attention block size
 constexpr int BLOCK_H = 64;       // heads per thread block
 constexpr int BLOCK_N = 64;       // KV tokens per iteration
-constexpr int MAX_SEQLEN = 8192;
+constexpr int SEQ_LEN = 4096;
+// constexpr int MAX_SEQLEN = 8192;
 #endif
 
 #include "kittens.cuh"
@@ -17,37 +18,37 @@ constexpr int MAX_SEQLEN = 8192;
 using namespace kittens;
 
 // Kernel 配置
-constexpr int NUM_WARPS = 4;
-constexpr int NUM_THREADS = NUM_WARPS * WARP_THREADS;  // 4 * 64 = 256
+constexpr int NUM_WARPS = 8;
+constexpr int NUM_THREADS = NUM_WARPS * WARP_THREADS;  // 4 * 64 = 512
 
 // Shared memory tile types (with swizzle for bank conflict reduction)
 // Q tiles: [BLOCK_H, DV] = [64, 512] 和 [BLOCK_H, DPE] = [64, 64]
-using ST_Q = st_bf<BLOCK_H, DV, st_16x16_s>;           // Q nope
-using ST_Q_pe = st_bf<BLOCK_H, DPE, st_16x16_s>;       // Q rope
+// using ST_Q = st_bf<BLOCK_H, DV, st_16x16_s>;           // Q nope
+// using ST_Q_pe = st_bf<BLOCK_H, DPE, st_16x16_s>;       // Q rope
 
 // KV tiles: [BLOCK_N, DV] = [64, 512] 和 [BLOCK_N, DPE] = [64, 64]
-using ST_KV = st_bf<BLOCK_N, DV, st_16x16_s>;          // KV (V is first DV dims)
-using ST_K_pe = st_bf<BLOCK_N, DPE, st_16x16_s>;       // K rope
+// using ST_KV = st_bf<BLOCK_N, DV, st_16x16_s>;          // KV (V is first DV dims)
+// using ST_K_pe = st_bf<BLOCK_N, DPE, st_16x16_s>;       // K rope
 
-// Score tile: [BLOCK_H, BLOCK_N] = [64, 64]
-using ST_S = st_bf<BLOCK_H, BLOCK_N, st_16x16_s>;
+// // Score tile: [BLOCK_H, BLOCK_N] = [64, 64]
+// using ST_S = st_bf<BLOCK_H, BLOCK_N, st_16x16_s>;
 
-// Per-warp register tiles
+// // Per-warp register tiles
 constexpr int WARP_H = BLOCK_H / NUM_WARPS;  // 64 / 4 = 16 rows per warp
 
-// Register tiles for accumulation (float32)
-using RT_S = rt_fl<WARP_H, BLOCK_N, row_l>;      // [16, 64] attention scores
-using RT_O = rt_fl<WARP_H, DV, row_l>;           // [16, 512] output accumulator
+// // Register tiles for accumulation (float32)
+// using RT_S = rt_fl<WARP_H, BLOCK_N, row_l>;      // [16, 64] attention scores
+// using RT_O = rt_fl<WARP_H, DV, row_l>;           // [16, 512] output accumulator
 
-// Register tiles for online softmax (per-row scalars)
-using RT_rowvec = rt_fl<WARP_H, 1, row_l>;       // [16, 1] for max/sum/scale
+// // Register tiles for online softmax (per-row scalars)
+// using RT_rowvec = rt_fl<WARP_H, 1, row_l>;       // [16, 1] for max/sum/scale
 
-// Global layout types
-using GL_Q = gl<bf16, 1, 1, -1, DV>;              // [batch, h_q, dv]
-using GL_Q_pe = gl<bf16, 1, 1, -1, DPE>;          // [batch, h_q, dpe]
-using GL_KV = gl<bf16, 1, 1, -1, DV>;             // [total_tokens, h_kv, dv]
-using GL_K_pe = gl<bf16, 1, 1, -1, DPE>;          // [total_tokens, h_kv, dpe]
-using GL_O = gl<bf16, 1, 1, -1, DV>;              // [batch, h_q, dv]
+// // Global layout types
+// using GL_Q = gl<bf16, 1, 1, -1, DV>;              // [batch, h_q, dv]
+// using GL_Q_pe = gl<bf16, 1, 1, -1, DPE>;          // [batch, h_q, dpe]
+// using GL_KV = gl<bf16, 1, 1, -1, DV>;             // [total_tokens, h_kv, dv]
+// using GL_K_pe = gl<bf16, 1, 1, -1, DPE>;          // [total_tokens, h_kv, dpe]
+// using GL_O = gl<bf16, 1, 1, -1, DV>;              // [batch, h_q, dv]
 
 __device__ bool thread0() {
     return threadIdx.x == 0 && blockIdx.x == 0 && blockIdx.y == 0;
@@ -66,20 +67,36 @@ __device__ bool thread0() {
  * 4. Paged attention via block_table indirect addressing
  * 5. Reverse iteration for numerical stability
  */
+
+
+
+ using GL_Q = gl<bf16, 1, BATCH, H_Q, DV+DPE>;
+ using GL_KV = gl<bf16, 1, BATCH, SEQ_LEN,DV+DPE>;
+//  using GL_TABLE = gl<int, 1, 1, BATCH, SEQ_LEN>;
+ using GL_O = gl<bf16, 1, BATCH, H_Q, DV>;
+ using G = kittens::group<NUM_WARPS>;
+ 
+
+ #define BARRIER {asm volatile("s_waitcnt vmcnt(0)"); asm volatile("s_waitcnt lgkmcnt(0)"); __syncthreads();}
+
 __global__ __launch_bounds__(NUM_THREADS, 2)
 void flashmla_paged_decoding(
-    bf16* __restrict__ Q,              // [batch, h_q, dv]
-    bf16* __restrict__ Q_pe,           // [batch, h_q, dpe]  
-    bf16* __restrict__ KV,             // [total_tokens, h_kv, dv]
-    bf16* __restrict__ K_pe,           // [total_tokens, h_kv, dpe]
-    int* __restrict__ block_table,     // [batch, max_num_blocks]
-    int* __restrict__ cache_seqlens,   // [batch]
-    bf16* __restrict__ Output,         // [batch, h_q, dv]
+    bf16* __restrict__ q_ptr,              // [batch, h_q, dv]
+    // int* __restrict__ block_table,     // [batch, max_num_blocks]
+    // bf16* __restrict__ blocked_kv,             // [total_tokens, h_kv, dv]
+    bf16* __restrict__ kv_ptr,
+    // int* __restrict__ cache_seqlens,   // [batch]
+    bf16* __restrict__ output_ptr,         // [batch, h_q, dv]
     int max_num_blocks                 // max blocks per batch
 ) {
+    GL_Q Q = GL_Q(q_ptr);
+    GL_KV KV = GL_KV(kv_ptr);
+    GL_O output = GL_O(output_ptr);
+
     // Block indices
     const int batch_idx = blockIdx.x;
     const int head_group = blockIdx.y;  // processes BLOCK_H heads at a time
+    __builtin_assume(head_group <= 2);
     const int warp_id = kittens::warpid();
     const int lane_id = kittens::laneid();
     
@@ -88,28 +105,119 @@ void flashmla_paged_decoding(
     shared_allocator al((int*)&__shm[0]);
     
     // Double-buffered KV tiles
+    using ST_Q = st_bf<BLOCK_H, DV + DPE, st_32x32_s>; // 64 * 512
     ST_Q& Q_shared = al.allocate<ST_Q>();
-    ST_Q_pe& Q_pe_shared = al.allocate<ST_Q_pe>();
-    ST_KV (&KV_shared)[2] = al.allocate<ST_KV, 2>();
-    ST_K_pe (&K_pe_shared)[2] = al.allocate<ST_K_pe, 2>();
+    constexpr auto size__73728 = sizeof(Q_shared); 
+                                  // 
+
+    using ST_S = st_bf<BLOCK_H, BLOCK_N, st_16x16_s>;
     ST_S& S_shared = al.allocate<ST_S>();
+    constexpr auto size_S__8192 = sizeof(S_shared); // 8192......
+
+ 
+    using ST_KV = st_bf<BLOCK_N, DV + DPE, st_16x16_s>;          // KV (V is first DV dims)
+    ST_KV (&KV_shared) = al.allocate<ST_KV>();
+    constexpr auto size_kv__73728 = sizeof(KV_shared); // 8192......
+    constexpr auto total_shared_sizes__155648 = size__73728 + size_S__8192 + size_kv__73728;
+                                
+    static_assert(total_shared_sizes__155648 <= 160000, "Shared memory size exceeds 160KB");
+    
+
+
+    // 64 * 64 / 8 = 32 * 16
+    rt_fl<16, 32, col_l> acc_s;
+    typename decltype(acc_s)::row_vec max_vec, max_vec_prev, norm_vec, scale_vec;
+    zero(acc_s);
+    zero(max_vec);
+    ones(scale_vec);
+    
+
+    // g2r for Q & Q_pe :::[64, 576]
+    // G::load(Q_shared, Q, {})
+    G::load(Q_shared, Q, {0, batch_idx, head_group * BLOCK_H, 0});
+    BARRIER;
+    // for k in seq_len // BN
+    const int num_kv_blocks = (SEQ_LEN + BLOCK_N - 1) / BLOCK_N;
+    rt_bf<16, 32, row_l, rt_16x32_s> A_tile;
+    rt_bf<32, 32, row_l, rt_16x32_s> B_tile;
+    rt_bf<32, 128, col_l, rt_32x32_s> o_reg; // 2row, 4col.
+    constexpr int regnum = sizeof(o_reg) / sizeof(float);
+
+    const int warp_row = warp_id / 2;
+    const int warp_col = warp_id % 2;
+    
+
+    for (int k = 0; k < num_kv_blocks; k++){
+        //  KV_shared = T.copy(blocked_kv)::: [64, 576]
+        G::load(KV_shared, KV, {0, batch_idx, k * BLOCK_N, 0});
+        BARRIER;
+        
+
+        // acc_s = T.gemm(Q & KV_shared) ::: [64, 64]
+        zero(acc_s);
+        for(int step = 0; step < 576/32; step += 1){
+            // load A (16 * 32)
+            // load B (32 * 32)
+            // C: (16 * 32)
+            load(A_tile, subtile_inplace<16, 32>(Q_shared, {warp_row, step}));
+            load(B_tile, subtile_inplace<32, 32>(KV_shared, {warp_col, step}));
+            mma_ABt(acc_s, A_tile, B_tile, acc_s);
+            
+        }
+        if(k == 0){
+            col_max(max_vec_prev, acc_s);
+        }
+        col_max(max_vec, acc_s, max_vec_prev);
+        sub(max_vec, max_vec, max_vec_prev);
+
+        copy(max_vec_prev, max_vec);
+        // 正确的 online softmax：
+        col_max(max_vec, acc_s, max_vec_prev);       // max_vec = max(col_max(acc_s), max_vec_prev)
+        sub(scale_vec, max_vec_prev, max_vec);       // scale_vec = old_max - new_max
+        exp2(scale_vec, scale_vec);                   // scale = 2^(old - new)
+        mul_col(o_reg, o_reg, scale_vec);            // rescale output accumulator
+        mul(sum_vec, sum_vec, scale_vec);            // rescale sum accumulator (如果有)
+        copy(max_vec_prev, max_vec);                  // 更新 max
+        
+
+    //     scores_max = -inf
+    //     scores_max = T.row_max(acc_s)
+    //     scores_max = max(scores_max, scores_max_prev)
+    //     scores_scale = T.exp2(scores_max_prev * scale - scores_max * scale)
+    //     acc_s = T.exp2(acc_s * scale - scores_max * scale)
+    //     scores_sum = T.row_sum(acc_s)
+    //     S_shared = T.copy(acc_s)
+    //     acc_o *= scores_scale
+    //     acc_o = acc_o + S_shared * KV_shared
+    }
+    
+    col_sum()
+    
+     
+        
+
+
+
+
+
     
     // Register tiles (per warp)
-    RT_S acc_s;           // Attention scores accumulator
-    RT_O acc_o;           // Output accumulator
-    RT_rowvec scores_max;      // Running max for online softmax
-    RT_rowvec scores_max_prev; // Previous max
-    RT_rowvec scores_scale;    // Scale factor: exp(prev_max - new_max)
-    RT_rowvec scores_sum;      // Sum of exp(scores)
-    RT_rowvec logsum;          // Running sum for normalization
+    // RT_S acc_s;           // Attention scores accumulator
+    // RT_O acc_o;           // Output accumulator
+    // RT_rowvec scores_max;      // Running max for online softmax
+    // RT_rowvec scores_max_prev; // Previous max
+    // RT_rowvec scores_scale;    // Scale factor: exp(prev_max - new_max)
+    // RT_rowvec scores_sum;      // Sum of exp(scores)
+    // RT_rowvec logsum;          // Running sum for normalization
     
     // Initialize accumulators
-    zero(acc_o);
-    zero(logsum);
-    neg_infty(scores_max);  // -infinity
+    // zero(acc_o);
+    // zero(logsum);
+    // neg_infty(scores_max);  // -infinity
     
     // ============ Load Q (once per block) ============
     // Q layout: [batch, h_q, dv], load [BLOCK_H, DV] tile
+/*
     const int q_row_start = batch_idx * H_Q + head_group * BLOCK_H;
     // Group-cooperative load
     // TODO: Use proper group load with swizzled offsets
@@ -280,6 +388,7 @@ void flashmla_paged_decoding(
         printf("FlashMLA decode: batch=%d, seqlen=%d, num_kv_blocks=%d\n", 
                batch_idx, seqlen, num_kv_blocks);
     }
+*/
 }
 
 // Host-side launcher (for non-RTC usage)

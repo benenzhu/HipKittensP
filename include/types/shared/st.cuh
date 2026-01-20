@@ -157,7 +157,7 @@ struct st_subtile {
     using col_vec = sv<dtype, rows>;
     using row_vec = sv<dtype, cols>;
 };
-
+#ifdef see_code
 namespace zz2 {
 using _ST = kittens::st<__hip_bfloat16, 128, 64, kittens::ducks::st_shape::st_16x32>;
 constexpr int _subtile_rows = 32;
@@ -219,6 +219,7 @@ struct st_subtile {
 };
     
 }
+#endif
 
 /* ----------  CONCEPTS  ---------- */
 
