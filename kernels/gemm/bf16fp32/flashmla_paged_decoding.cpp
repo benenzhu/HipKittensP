@@ -31,11 +31,11 @@
 constexpr int BATCH = 4;
 constexpr int H_Q = 128;          // query heads
 constexpr int H_KV = 1;           // kv heads (MLA absorbed)
-constexpr int DV = 512;           // value dim (kv_lora_rank)
+constexpr int DV__512 = 512;           // value dim (kv_lora_rank)
 constexpr int DPE = 64;           // rope dim
 constexpr int PAGE_BLOCK_SIZE = 64;  // paged attention block size
-constexpr int BLOCK_H = 64;       // heads per thread block
-constexpr int BLOCK_N = 64;       // KV tokens per iteration
+constexpr int BLOCK_H__64 = 64;       // heads per thread block
+constexpr int BLOCK_N__64 = 64;       // KV tokens per iteration
 constexpr int SEQ_LEN = 4096;
 // constexpr int MAX_SEQLEN = 8192;
 // #endif
@@ -62,7 +62,7 @@ constexpr int NUM_THREADS = NUM_WARPS * WARP_THREADS;  // 4 * 64 = 512
 // using ST_S = st_bf<BLOCK_H, BLOCK_N, st_16x16_s>;
 
 // // Per-warp register tiles
-constexpr int WARP_H = BLOCK_H / NUM_WARPS;  // 64 / 4 = 16 rows per warp
+constexpr int WARP_H = BLOCK_H__64 / NUM_WARPS;  // 64 / 4 = 16 rows per warp
 
 // // Register tiles for accumulation (float32)
 // using RT_S = rt_fl<WARP_H, BLOCK_N, row_l>;      // [16, 64] attention scores
@@ -98,12 +98,12 @@ __device__ bool thread0() {
 
 
 
- using GL_Q = gl<bf16, 1, BATCH, H_Q, DV>;
+ using GL_Q = gl<bf16, 1, BATCH, H_Q, DV__512>;
  using GL_QPE = gl<bf16, 1, BATCH, H_Q, DPE>;
- using GL_KV = gl<bf16, 1, BATCH, SEQ_LEN, DV>;
+ using GL_KV = gl<bf16, 1, BATCH, SEQ_LEN, DV__512>;
  using GL_KVPE = gl<bf16, 1, BATCH, SEQ_LEN, DPE>;
 //  using GL_TABLE = gl<int, 1, 1, BATCH, SEQ_LEN>;
- using GL_O = gl<bf16, 1, BATCH, H_Q, DV>;
+ using GL_O = gl<bf16, 1, BATCH, H_Q, DV__512>;
  using G = kittens::group<NUM_WARPS>;
  
 
@@ -141,28 +141,28 @@ void flashmla_paged_decoding(
     shared_allocator al((int*)&__shm[0]);
     
     // Double-buffered KV tiles
-    using ST_Q = st_bf<BLOCK_H, DV, st_32x32_s>; // 64 * 512
+    using ST_Q = st_bf<BLOCK_H__64, DV__512, st_32x32_s>; // 64 * 512
     ST_Q& Q_shared = al.allocate<ST_Q>();
-    constexpr auto size__73728 = sizeof(Q_shared); 
-                                  // 
 
-    using ST_S = st_bf<BLOCK_H, BLOCK_N, st_16x16_s>;
+    using ST_S = st_bf<BLOCK_H__64, BLOCK_N__64, st_16x16_s>;
     ST_S& S_shared = al.allocate<ST_S>();
-    constexpr auto size_S__8192 = sizeof(S_shared); // 8192......
 
  
-    using ST_KV = st_bf<BLOCK_N, DV, st_16x16_s>;          // KV (V is first DV dims)
+    using ST_KV = st_bf<BLOCK_N__64, DV__512, st_16x16_s>;          // KV (V is first DV dims)
     ST_KV (&KV_shared) = al.allocate<ST_KV>();
-    constexpr auto size_kv__73728 = sizeof(KV_shared); // 8192......
-    constexpr auto total_shared_sizes__155648 = size__73728 + size_S__8192 + size_kv__73728;
+    
+    using ST_ACC_S = st_bf<BLOCK_H__64, BLOCK_N__64, st_16x16_s>;
+    ST_ACC_S& acc_s_shared = al.allocate<ST_ACC_S>();
+
+    constexpr auto total_shared_sizes__147456 = sizeof(Q_shared) + sizeof(S_shared) + sizeof(KV_shared) + sizeof(acc_s_shared);
                                 
-    static_assert(total_shared_sizes__155648 <= 160000, "Shared memory size exceeds 160KB");
+    static_assert(total_shared_sizes__147456 <= 160000, "Shared memory size exceeds 160KB");
     
 
 
     // 64 * 64 / 8 = 32 * 16
     rt_fl<16, 32, col_l> acc_s;
-    typename decltype(acc_s)::row_vec max_vec, max_vec_prev, norm_vec, scale_vec;
+    typename decltype(acc_s)::row_vec max_vec, max_vec_prev, scores_sum, scale_vec, log_sum;
     zero(acc_s);
     zero(max_vec);
     ones(scale_vec);
@@ -173,7 +173,7 @@ void flashmla_paged_decoding(
     G::load(Q_shared, Q, {0, batch_idx, head_group, 0});
     BARRIER;
     // for k in seq_len // BN
-    constexpr int num_kv_blocks = (SEQ_LEN + BLOCK_N - 1) / BLOCK_N;
+    constexpr int num_kv_blocks = (SEQ_LEN + BLOCK_N__64 - 1) / BLOCK_N__64;
     rt_bf<16, 32, row_l, rt_16x32_s> A_tile;
     rt_bf<32, 32, row_l, rt_16x32_s> B_tile;
     rt_fl<32, 128, col_l, rt_32x32_s> acc_o; // 2row, 4col.
@@ -201,7 +201,7 @@ void flashmla_paged_decoding(
 
         // 1. acc_s = T.gemm(Q @ KV_shared) ::: [64, 64]
         zero(acc_s);
-        for(int step = 0; step < DV/32; step += 1){
+        for(int step = 0; step < DV__512/32; step += 1){
             // load A (16 * 32)
             // load B (32 * 32)
             // C: (16 * 32)
@@ -232,10 +232,14 @@ void flashmla_paged_decoding(
 
         // 8. acc_s_shared = acc_s 
         // TODO:
+        store(acc_s_shared, acc_s);
         
         // 8.1 scores_sum = T.row_sum(acc_s)
+        row_sum(scores_sum, acc_s, scores_sum);
         // 8.2 logsum *=scale_vec 
+        mul(log_sum, log_sum, scale_vec);
         // 8.3 logsum += scores_sum
+        add(log_sum, log_sum, scores_sum);
         // 9 acc_o *= scores_vec
         mul_col(acc_o, acc_o, scale_vec);
 
