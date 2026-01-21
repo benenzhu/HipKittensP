@@ -149,12 +149,12 @@ void flashmla_paged_decoding(
 
  
     using ST_KV = st_bf<BLOCK_N__64, DV__512, st_16x16_s>;          // KV (V is first DV dims)
-    ST_KV (&KV_shared) = al.allocate<ST_KV>();
+    ST_KV (&shared_KV) = al.allocate<ST_KV>();
     
     using ST_ACC_S = st_bf<BLOCK_H__64, BLOCK_N__64, st_16x16_s>;
-    ST_ACC_S& acc_s_shared = al.allocate<ST_ACC_S>();
+    ST_ACC_S& shared_s = al.allocate<ST_ACC_S>();
 
-    constexpr auto total_shared_sizes__147456 = sizeof(Q_shared) + sizeof(S_shared) + sizeof(KV_shared) + sizeof(acc_s_shared);
+    constexpr auto total_shared_sizes__147456 = sizeof(Q_shared) + sizeof(S_shared) + sizeof(shared_KV) + sizeof(shared_s);
                                 
     static_assert(total_shared_sizes__147456 <= 160000, "Shared memory size exceeds 160KB");
     
@@ -176,7 +176,9 @@ void flashmla_paged_decoding(
     constexpr int num_kv_blocks = (SEQ_LEN + BLOCK_N__64 - 1) / BLOCK_N__64;
     rt_bf<16, 32, row_l, rt_16x32_s> A_tile;
     rt_bf<32, 32, row_l, rt_16x32_s> B_tile;
-    rt_fl<32, 128, col_l, rt_32x32_s> acc_o; // 2row, 4col.
+    rt_bf<64, 64, row_l, rt_16x32_s> A2_tile;
+    rt_bf<64, 64, row_l, rt_16x32_s> B2_tile;
+    rt_fl<64, 64, col_l, rt_32x32_s> acc_o; // 2row, 4col.
     constexpr int regnum = sizeof(acc_o) / sizeof(float);
 
     const int warp_row = warp_id / 2;
@@ -192,7 +194,7 @@ void flashmla_paged_decoding(
     for (int k = 0; k < num_kv_blocks - 2; k++){
         //  KV_shared = T.copy(blocked_kv)::: [64, 576]
         // if(thread0())printf("batch_idx:%d, pos: %d, kv_ptr %p DV: %d\n", batch_idx, k * BLOCK_N, kv_ptr, DV);
-        G::load(KV_shared, KV, {0, batch_idx, k, 0});
+        G::load(shared_KV, KV, {0, batch_idx, k, 0});
         
         constexpr float now = 16777216.0 / (4 * 4096 * 512) / 2;
         constexpr float now2 = 212336640.0 / (4 * 4096 * 512) / 2;
@@ -206,7 +208,7 @@ void flashmla_paged_decoding(
             // load B (32 * 32)
             // C: (16 * 32)
             load(A_tile, subtile_inplace<16, 32>(Q_shared, {warp_row, step}));
-            load(B_tile, subtile_inplace<32, 32>(KV_shared, {warp_col, step}));
+            load(B_tile, subtile_inplace<32, 32>(shared_KV, {warp_col, step}));
             mma_ABt(acc_s, A_tile, B_tile, acc_s);
             
         }
@@ -232,7 +234,7 @@ void flashmla_paged_decoding(
 
         // 8. acc_s_shared = acc_s 
         // TODO:
-        store(acc_s_shared, acc_s);
+        store(shared_s, acc_s);
         
         // 8.1 scores_sum = T.row_sum(acc_s)
         row_sum(scores_sum, acc_s, scores_sum);
@@ -244,14 +246,21 @@ void flashmla_paged_decoding(
         mul_col(acc_o, acc_o, scale_vec);
 
         // 10 acc_o = T.gemm(acc_s, KV_shared)
-        mma_AB(acc_o, acc_s, KV_shared, acc_o);
+        // acc_o 分工： <64, 64 * 8>
+        // shared_s: <64, 64>
+        // shared_kv: <64, 512>
+        {
+            load(A2_tile, subtile_inplace<64,64>(shared_s, {0,0}));
+            load(B2_tile, subtile_inplace<64,64>(shared_KV, {0, kittens::warpid()}));
+            mma_ABt(acc_o, A2_tile, B2_tile, acc_o);
+        }
 
     }
     
 
     /* TODO(zty)::::: */ 
     // 11 final: o_reg /= logsum 
-    // div_col(o_reg, o_reg, norm_vec);
+    div_col(acc_o, acc_o, scores_sum);
     
     rt_fl<128, 32, row_l, rt_32x32_s> o_reg_transposed; // 2row, 4col.
     transpose(o_reg_transposed, acc_o);
