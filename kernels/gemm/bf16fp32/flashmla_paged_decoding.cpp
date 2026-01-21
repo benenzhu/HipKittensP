@@ -153,6 +153,7 @@ void flashmla_paged_decoding(
     
     using ST_ACC_S = st_bf<BLOCK_H__64, BLOCK_N__64, st_16x16_s>;
     ST_ACC_S& shared_s = al.allocate<ST_ACC_S>();
+    
 
     constexpr auto total_shared_sizes__147456 = sizeof(Q_shared) + sizeof(S_shared) + sizeof(shared_KV) + sizeof(shared_s);
                                 
@@ -162,6 +163,7 @@ void flashmla_paged_decoding(
 
     // 64 * 64 / 8 = 32 * 16
     rt_fl<16, 32, col_l> acc_s;
+    rt_fl<8, 64, col_l, rt_8x64> acc_s_trans;
     typename decltype(acc_s)::row_vec max_vec, max_vec_prev, scores_sum, scale_vec, log_sum;
     zero(acc_s);
     zero(max_vec);
@@ -176,8 +178,8 @@ void flashmla_paged_decoding(
     constexpr int num_kv_blocks = (SEQ_LEN + BLOCK_N__64 - 1) / BLOCK_N__64;
     rt_bf<16, 32, row_l, rt_16x32_s> A_tile;
     rt_bf<32, 32, row_l, rt_16x32_s> B_tile;
-    rt_bf<64, 64, row_l, rt_16x32_s> A2_tile;
-    rt_bf<64, 64, row_l, rt_16x32_s> B2_tile;
+    rt_bf<64, 64, row_l, rt_32x16_s> A2_tile;
+    rt_bf<64, 64, row_l, rt_32x16_s> B2_tile;
     rt_fl<64, 64, col_l, rt_32x32_s> acc_o; // 2row, 4col.
     constexpr int regnum = sizeof(acc_o) / sizeof(float);
 
@@ -212,6 +214,8 @@ void flashmla_paged_decoding(
             mma_ABt(acc_s, A_tile, B_tile, acc_s);
             
         }
+        store(subtile_inplace<16, 32>(shared_s, {warp_row, warp_col}), acc_s);
+
         //TODO: add a gemm for QPE @ KPE here..
         // 更新最大值
         // 2.1 max_vec_prev = max_vec
@@ -227,17 +231,20 @@ void flashmla_paged_decoding(
         exp2(scale_vec, scale_vec);      
 
         // 6. acc_s -= max_vec 
-        sub(acc_s, max_vec);
+        // TODO(zty)::::
+        // sub(acc_s, max_vec);
         
         // 7. acc_s = T.exp2(acc_s)
         exp2(acc_s, acc_s);
 
         // 8. acc_s_shared = acc_s 
-        // TODO:
-        store(shared_s, acc_s);
+        // TODO(zty):
+        // store(shared_s, acc_s);
         
         // 8.1 scores_sum = T.row_sum(acc_s)
-        row_sum(scores_sum, acc_s, scores_sum);
+        // TODO:
+        // row_sum(scores_sum, acc_s, scores_sum);
+
         // 8.2 logsum *=scale_vec 
         mul(log_sum, log_sum, scale_vec);
         // 8.3 logsum += scores_sum
@@ -258,11 +265,9 @@ void flashmla_paged_decoding(
     }
     
 
-    /* TODO(zty)::::: */ 
-    // 11 final: o_reg /= logsum 
     div_col(acc_o, acc_o, scores_sum);
     
-    rt_fl<128, 32, row_l, rt_32x32_s> o_reg_transposed; // 2row, 4col.
+    rt_fl<64, 64, row_l, rt_32x32_s> o_reg_transposed; // 2row, 4col.
     transpose(o_reg_transposed, acc_o);
     
     // TODO(zty):::::: 

@@ -27,6 +27,7 @@ struct rt_shape {
     static constexpr int num_strides = elements_per_thread / stride;
 };
 
+using rt_8x64 = rt_shape<8, 64, 4>;
 using rt_16x16 = rt_shape<16, 16, 4>;
 using rt_32x32 = rt_shape<32, 32, 4>;
 using rt_32x32_8 = rt_shape<32, 32, 8>;
@@ -44,6 +45,7 @@ concept all = std::is_same_v<T, rt_16x16> ||
               std::is_same_v<T, rt_32x16> || 
               std::is_same_v<T, rt_32x16_4> || 
               std::is_same_v<T, rt_16x32_4> ||
+              std::is_same_v<T, rt_8x64> ||
               std::is_same_v<T, rt_16x128>;
 
 /**
