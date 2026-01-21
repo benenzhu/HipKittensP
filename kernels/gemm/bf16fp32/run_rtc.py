@@ -116,7 +116,7 @@ def test_kittens_kernel():
     return C
 
 
-ret = test_kittens_kernel()
+# ret = test_kittens_kernel()
 
 
 def scaled_dot_product_attention(query, key, value, h_q, h_kv, is_causal=False):
@@ -207,13 +207,13 @@ def ref_mla_decode(q, blocked_kv, block_table, cache_seqlens, h_q, h_kv, d, dv, 
     
     return out
 
-if False:
+if True:
     # DeepSeek-V2/V3 MLA 参数
     b = 4           # batch size
-    s_q = 1         # decode 阶段 query 长度为 1
-    h_q = 128       # query heads
+    s_q__1 = 1         # decode 阶段 query 长度为 1
+    h_q__128 = 128       # query heads
     h_kv = 1        # kv heads (MLA absorb 后)
-    d = 576         # query/key dim = dv + dpe
+    d__576 = 576         # query/key dim = dv + dpe
     dv = 512        # value dim (kv_lora_rank)
     dpe = 64        # rope dim
     
@@ -230,12 +230,12 @@ if False:
     max_seqlen_pad = math.ceil(max_seqlen / block_size) * block_size
     num_blocks_per_batch = max_seqlen_pad // block_size
     
-    q = torch.randn(b, s_q, h_q, d, dtype=dtype, device=device)
+    q = torch.randn(b, s_q__1, h_q__128, d__576, dtype=dtype, device=device)
     block_table = torch.randperm(b * num_blocks_per_batch, dtype=torch.int32, device=device).view(b, num_blocks_per_batch)
-    blocked_kv = torch.randn(block_table.numel(), block_size, h_kv, d, dtype=dtype, device=device)
+    blocked_kv = torch.randn(block_table.numel(), block_size, h_kv, d__576, dtype=dtype, device=device)
     
     # 运行参考实现
-    out = ref_mla_decode(q, blocked_kv, block_table, cache_seqlens, h_q, h_kv, d, dv, causal=True)
+    out = ref_mla_decode(q, blocked_kv, block_table, cache_seqlens, h_q__128, h_kv, d__576, dv, causal=True)
     
     print(f"Input Q shape: {q.shape}")
     print(f"Input blocked_kv shape: {blocked_kv.shape}")
@@ -246,3 +246,17 @@ if False:
     print(f"Output shape: {out.shape}")
     print(f"Output dtype: {out.dtype}")
     print("Reference MLA decode completed successfully!")
+
+
+def run_kittens_mla(): 
+    mla_kittens = get_kernel("flashmla_paged_decoding", "flashmla_paged_decoding.cpp")  
+    grid = (1, 1, 1)
+    block = (512, 1, 1)
+    SEQ_LEN = 4096
+    q = torch.randn(b, s_q__1, h_q__128, d__576).cuda().bfloat16().contiguous()
+    kv = torch.randn(1, b, SEQ_LEN, d__576).cuda().bfloat16().contiguous()
+    mla_kittens(grid, block, (q, kv, out))
+    
+    print("out", out)
+
+run_kittens_mla()

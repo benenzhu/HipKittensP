@@ -70,8 +70,10 @@ __device__ bool thread0() {
 
 
 
- using GL_Q = gl<bf16, 1, BATCH, H_Q, DV+DPE>;
- using GL_KV = gl<bf16, 1, BATCH, SEQ_LEN,DV+DPE>;
+ using GL_Q = gl<bf16, 1, BATCH, H_Q, DV>;
+ using GL_QPE = gl<bf16, 1, BATCH, H_Q, DPE>;
+ using GL_KV = gl<bf16, 1, BATCH, SEQ_LEN,DV>;
+ using GL_KVPE = gl<bf16, 1, BATCH, SEQ_LEN,DPE>;
 //  using GL_TABLE = gl<int, 1, 1, BATCH, SEQ_LEN>;
  using GL_O = gl<bf16, 1, BATCH, H_Q, DV>;
  using G = kittens::group<NUM_WARPS>;
@@ -82,16 +84,21 @@ __device__ bool thread0() {
 __global__ __launch_bounds__(NUM_THREADS, 2)
 void flashmla_paged_decoding(
     bf16* __restrict__ q_ptr,              // [batch, h_q, dv]
+    bf16* __restrict__ qpe_ptr, 
+    bf16* __restrict__ kv_ptr,
+    bf16* __restrict__ kvpe_ptr,
+    bf16* __restrict__ output_ptr         // [batch, h_q, dv]
     // int* __restrict__ block_table,     // [batch, max_num_blocks]
     // bf16* __restrict__ blocked_kv,             // [total_tokens, h_kv, dv]
-    bf16* __restrict__ kv_ptr,
     // int* __restrict__ cache_seqlens,   // [batch]
-    bf16* __restrict__ output_ptr,         // [batch, h_q, dv]
-    int max_num_blocks                 // max blocks per batch
+    // int max_num_blocks                 // max blocks per batch
 ) {
     GL_Q Q = GL_Q(q_ptr);
+    GL_QPE QPE = GL_QPE(qpe_ptr);
     GL_KV KV = GL_KV(kv_ptr);
+    GL_KVPE KVPE = GL_KVPE(kvpe_ptr);
     GL_O output = GL_O(output_ptr);
+
 
     // Block indices
     const int batch_idx = blockIdx.x;
@@ -140,7 +147,7 @@ void flashmla_paged_decoding(
     const int num_kv_blocks = (SEQ_LEN + BLOCK_N - 1) / BLOCK_N;
     rt_bf<16, 32, row_l, rt_16x32_s> A_tile;
     rt_bf<32, 32, row_l, rt_16x32_s> B_tile;
-    rt_bf<32, 128, col_l, rt_32x32_s> o_reg; // 2row, 4col.
+    rt_fl<32, 128, col_l, rt_32x32_s> o_reg; // 2row, 4col.
     constexpr int regnum = sizeof(o_reg) / sizeof(float);
 
     const int warp_row = warp_id / 2;
@@ -175,8 +182,9 @@ void flashmla_paged_decoding(
         col_max(max_vec, acc_s, max_vec_prev);       // max_vec = max(col_max(acc_s), max_vec_prev)
         sub(scale_vec, max_vec_prev, max_vec);       // scale_vec = old_max - new_max
         exp2(scale_vec, scale_vec);                   // scale = 2^(old - new)
-        mul_col(o_reg, o_reg, scale_vec);            // rescale output accumulator
-        mul(sum_vec, sum_vec, scale_vec);            // rescale sum accumulator (如果有)
+        // TODO：zty wrong here....
+        // mul_col(o_reg, o_reg, scale_vec);            // rescale output accumulator
+        // mul(sum_vec, sum_vec, scale_vec);            // rescale sum accumulator (如果有)
         copy(max_vec_prev, max_vec);                  // 更新 max
         
 
@@ -191,204 +199,15 @@ void flashmla_paged_decoding(
     //     acc_o = acc_o + S_shared * KV_shared
     }
     
-    col_sum()
-    
-     
-        
 
-
-
-
-
+    /* TODO(zty)::::: */ 
+    // div_col(o_reg, o_reg, norm_vec);
     
-    // Register tiles (per warp)
-    // RT_S acc_s;           // Attention scores accumulator
-    // RT_O acc_o;           // Output accumulator
-    // RT_rowvec scores_max;      // Running max for online softmax
-    // RT_rowvec scores_max_prev; // Previous max
-    // RT_rowvec scores_scale;    // Scale factor: exp(prev_max - new_max)
-    // RT_rowvec scores_sum;      // Sum of exp(scores)
-    // RT_rowvec logsum;          // Running sum for normalization
+    rt_fl<128, 32, row_l, rt_32x32_s> o_reg_transposed; // 2row, 4col.
+    transpose(o_reg_transposed, o_reg);
     
-    // Initialize accumulators
-    // zero(acc_o);
-    // zero(logsum);
-    // neg_infty(scores_max);  // -infinity
-    
-    // ============ Load Q (once per block) ============
-    // Q layout: [batch, h_q, dv], load [BLOCK_H, DV] tile
-/*
-    const int q_row_start = batch_idx * H_Q + head_group * BLOCK_H;
-    // Group-cooperative load
-    // TODO: Use proper group load with swizzled offsets
-    // For now, simple warp-cooperative load
-    if (warp_id < 2) {
-        // Load Q_shared in cooperative manner
-        // Each warp loads a portion
-    }
-    __syncthreads();
-    
-    // Get sequence length for this batch
-    const int seqlen = cache_seqlens[batch_idx];
-    const int num_kv_blocks = (seqlen + BLOCK_N - 1) / BLOCK_N;
-    
-    // Softmax scale factor: 1/sqrt(d) where d = DV + DPE = 576
-    constexpr float scale = 1.0f / 24.0f;  // 1/sqrt(576) ≈ 0.0417, using log2 scale
-    constexpr float log2e = 1.4426950408889634f;
-    constexpr float softmax_scale = scale * log2e;  // For exp2 instead of exp
-    
-    // ============ Main Loop: Iterate over KV blocks ============
-    // Reverse iteration for numerical stability (recent tokens first)
-    int tic = 0, toc = 1;
-    
-    // Prefetch first KV block
-    if (num_kv_blocks > 0) {
-        int k = num_kv_blocks - 1;
-        int page_idx = block_table[batch_idx * max_num_blocks + (k * BLOCK_N) / PAGE_BLOCK_SIZE];
-        int kv_row_start = page_idx * PAGE_BLOCK_SIZE + (k * BLOCK_N) % PAGE_BLOCK_SIZE;
-        // Load KV_shared[tic] and K_pe_shared[tic]
-        // TODO: Add proper async load
-    }
-    
-    for (int kr = 0; kr < num_kv_blocks; kr++) {
-        int k = num_kv_blocks - 1 - kr;  // Reverse order
-        
-        // Wait for current KV load
-        __syncthreads();
-        
-        // Start loading next KV block (if exists)
-        if (kr + 1 < num_kv_blocks) {
-            int k_next = num_kv_blocks - 1 - (kr + 1);
-            int page_idx = block_table[batch_idx * max_num_blocks + (k_next * BLOCK_N) / PAGE_BLOCK_SIZE];
-            int kv_row_start = page_idx * PAGE_BLOCK_SIZE + (k_next * BLOCK_N) % PAGE_BLOCK_SIZE;
-            // Async load KV_shared[toc] and K_pe_shared[toc]
-            // TODO: Add proper async load
-        }
-        
-        // ============ Compute Attention Scores ============
-        // acc_s = Q_nope @ KV^T + Q_rope @ K_pe^T
-        zero(acc_s);
-        
-        // Get warp's subtile of Q
-        auto Q_subtile = subtile_inplace<WARP_H, DV>(Q_shared, {warp_id, 0});
-        auto Q_pe_subtile = subtile_inplace<WARP_H, DPE>(Q_pe_shared, {warp_id, 0});
-        
-        // Load Q subtile to registers
-        rt_bf<WARP_H, DV, row_l> q_reg;
-        rt_bf<WARP_H, DPE, row_l> q_pe_reg;
-        load(q_reg, Q_subtile);
-        load(q_pe_reg, Q_pe_subtile);
-        
-        // Load KV and K_pe to registers (all warps load same KV for broadcast)
-        rt_bf<BLOCK_N, DV, row_l> kv_reg;
-        rt_bf<BLOCK_N, DPE, row_l> k_pe_reg;
-        load(kv_reg, KV_shared[tic]);
-        load(k_pe_reg, K_pe_shared[tic]);
-        
-        // GEMM: Q_nope @ KV^T
-        mma_ABt(acc_s, q_reg, kv_reg, acc_s);
-        
-        // GEMM: Q_rope @ K_pe^T (accumulate)
-        mma_ABt(acc_s, q_pe_reg, k_pe_reg, acc_s);
-        
-        // ============ Online Softmax ============
-        // Save previous max
-        copy(scores_max_prev, scores_max);
-        neg_infty(scores_max);
-        
-        // Compute row-wise max of acc_s
-        row_max(scores_max, acc_s, scores_max);
-        
-        // Global max = max(prev_max, current_max)
-        max(scores_max, scores_max, scores_max_prev);
-        
-        // Compute scale factor: exp2((prev_max - new_max) * softmax_scale)
-        sub(scores_scale, scores_max_prev, scores_max);
-        mul(scores_scale, scores_scale, softmax_scale);
-        exp2(scores_scale, scores_scale);
-        
-        // Apply softmax to scores: exp2((score - max) * scale)
-        // For each element: acc_s[i,j] = exp2((acc_s[i,j] - scores_max[i]) * softmax_scale)
-        #pragma unroll
-        for (int i = 0; i < acc_s.height; i++) {
-            #pragma unroll
-            for (int j = 0; j < acc_s.width; j++) {
-                float val = acc_s.tiles[i][j].data[0].x;  // Simplified access
-                val = exp2f((val - scores_max.tiles[i][0].data[0].x) * softmax_scale);
-                acc_s.tiles[i][j].data[0].x = val;
-            }
-        }
-        
-        // Mask out-of-bounds positions (only first iteration needs this)
-        if (kr == 0) {
-            // Mask positions >= seqlen
-            #pragma unroll
-            for (int i = 0; i < acc_s.height; i++) {
-                #pragma unroll
-                for (int j = 0; j < acc_s.width; j++) {
-                    int token_idx = k * BLOCK_N + j;  // Simplified
-                    if (token_idx >= seqlen) {
-                        acc_s.tiles[i][j].data[0].x = 0.0f;
-                    }
-                }
-            }
-        }
-        
-        // Compute row sum
-        zero(scores_sum);
-        row_sum(scores_sum, acc_s, scores_sum);
-        
-        // Update running sum: logsum = logsum * scale + sum
-        mul(logsum, logsum, scores_scale);
-        add(logsum, logsum, scores_sum);
-        
-        // Scale previous output: acc_o *= scale
-        #pragma unroll
-        for (int i = 0; i < acc_o.height; i++) {
-            #pragma unroll  
-            for (int j = 0; j < acc_o.width; j++) {
-                mul(acc_o.tiles[i][j], acc_o.tiles[i][j], scores_scale.tiles[i][0]);
-            }
-        }
-        
-        // Store scores to shared memory for GEMM
-        store(S_shared, acc_s);  // Need to convert float -> bf16
-        __syncthreads();
-        
-        // ============ Accumulate Output ============
-        // acc_o += scores @ V (V is KV_shared, first DV columns)
-        auto S_subtile = subtile_inplace<WARP_H, BLOCK_N>(S_shared, {warp_id, 0});
-        rt_bf<WARP_H, BLOCK_N, row_l> s_reg;
-        load(s_reg, S_subtile);
-        
-        // Note: V = KV (same tensor in MLA)
-        mma_AB(acc_o, s_reg, kv_reg, acc_o);
-        
-        // Toggle double buffer
-        tic ^= 1;
-        toc ^= 1;
-    }
-    
-    // ============ Normalize Output ============
-    // acc_o /= logsum
-    #pragma unroll
-    for (int i = 0; i < acc_o.height; i++) {
-        #pragma unroll
-        for (int j = 0; j < acc_o.width; j++) {
-            div(acc_o.tiles[i][j], acc_o.tiles[i][j], logsum.tiles[i][0]);
-        }
-    }
-    
-    // ============ Write Output ============
-    const int o_row_start = batch_idx * H_Q + head_group * BLOCK_H + warp_id * WARP_H;
-    // TODO: Store acc_o to global memory Output
-    // store(Output + o_row_start * DV, acc_o);
-    
-    if (thread0()) {
-        printf("FlashMLA decode: batch=%d, seqlen=%d, num_kv_blocks=%d\n", 
-               batch_idx, seqlen, num_kv_blocks);
-    }
-*/
+    // TODO(zty):::::: 
+    // store(output, o_reg_transposed, {0, batch_idx, head_group * BLOCK_H, 0});
 }
 
 // Host-side launcher (for non-RTC usage)
