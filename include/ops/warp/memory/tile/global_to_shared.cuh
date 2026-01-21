@@ -61,6 +61,7 @@ __device__ inline void load(ST& dst, const GL& src, const COORD& idx)
             uintptr_t lds_addr = lds_base + (i * num_warps * bytes_per_warp);
             as3_uint32_ptr lds_ptr = (as3_uint32_ptr)(lds_addr);
 
+            // if (threadIdx.x == 0) printf("zty:: load use: %p %p %d\n", src.raw_ptr, global_ptr, swizzled_global_byte_offset);
             llvm_amdgcn_raw_buffer_load_lds(
                 srsrc, // buffer resource
                 lds_ptr,

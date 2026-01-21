@@ -79,6 +79,9 @@ struct gl {
             #endif
             {}
     __device__ inline T& operator[](const coord<ducks::default_type> &idx) const { // yes I am abusing the const qualifier here a bit.
+        int64_t ret_value = ((idx.b*depth() + idx.d)*rows() + idx.r)*cols() + idx.c;
+        // if(threadIdx.x == 0) printf("zty:: ret_value: %lld idx.b: %d depth: %d idx.d: %d rows: %d idx.r: %d cols: %d idx.c: %d\n", ret_value, idx.b, depth(), idx.d, rows(), idx.r, cols(), idx.c);
+
         return raw_ptr[((idx.b*depth() + idx.d)*rows() + idx.r)*cols() + idx.c];
     }
     __device__ inline gl(T *_data):raw_ptr(_data){};

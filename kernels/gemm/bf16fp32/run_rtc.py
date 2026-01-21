@@ -1,3 +1,9 @@
+import os
+# os.environ["ROCPROF_COUNTER_COLLECTION"] = "1"
+# os.environ["HSA_TOOLS_LIB"]="/opt/rocm/lib/librocm-debug-agent.so.2" 
+# os.environ["HSA_ENABLE_DEBUG"]="1o"
+os.environ["PYTORCH_NO_HIP_MEMORY_CACHING"]="1"
+os.environ["HSA_DISABLE_FRAGMENT_ALLOCATOR"]="1"
 import torch
 from dataclasses import dataclass
 import torch
@@ -6,7 +12,6 @@ import importlib
 import rtc
 import os
 import math
-# os.environ["ROCPROF_COUNTER_COLLECTION"] = "1"
 
 importlib.reload(rtc)
 # import tritonblas
@@ -214,8 +219,8 @@ if True:
     h_q__128 = 128       # query heads
     h_kv = 1        # kv heads (MLA absorb 后)
     d__576 = 576         # query/key dim = dv + dpe
-    dv = 512        # value dim (kv_lora_rank)
-    dpe = 64        # rope dim
+    dv__512 = 512        # value dim (kv_lora_rank)
+    dpe__64 = 64        # rope dim
     
     block_size = 64
     cache_seqlen = 8192
@@ -235,7 +240,7 @@ if True:
     blocked_kv = torch.randn(block_table.numel(), block_size, h_kv, d__576, dtype=dtype, device=device)
     
     # 运行参考实现
-    out = ref_mla_decode(q, blocked_kv, block_table, cache_seqlens, h_q__128, h_kv, d__576, dv, causal=True)
+    out = ref_mla_decode(q, blocked_kv, block_table, cache_seqlens, h_q__128, h_kv, d__576, dv__512, causal=True)
     
     print(f"Input Q shape: {q.shape}")
     print(f"Input blocked_kv shape: {blocked_kv.shape}")
@@ -253,10 +258,12 @@ def run_kittens_mla():
     grid = (1, 1, 1)
     block = (512, 1, 1)
     SEQ_LEN = 4096
-    q = torch.randn(b, s_q__1, h_q__128, d__576).cuda().bfloat16().contiguous()
-    kv = torch.randn(1, b, SEQ_LEN, d__576).cuda().bfloat16().contiguous()
-    mla_kittens(grid, block, (q, kv, out))
-    
-    print("out", out)
+    q = torch.randn(b, s_q__1, h_q__128, dv__512).cuda().bfloat16().contiguous()
+    qpe = torch.randn(b, s_q__1, h_q__128, dpe__64).cuda().bfloat16().contiguous()
+    kv = torch.randn(1, b, SEQ_LEN, dv__512).cuda().bfloat16().contiguous()
+    kvpe = torch.randn(1, b, SEQ_LEN, dpe__64).cuda().bfloat16().contiguous()
+    mla_kittens(grid, block, (q, qpe, kv, kvpe, out), shared_mem=160000)
+    print("out") 
+    # print("out", out)
 
 run_kittens_mla()

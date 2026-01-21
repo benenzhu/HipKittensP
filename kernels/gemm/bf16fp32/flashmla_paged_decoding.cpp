@@ -1,4 +1,32 @@
-#ifndef PYTHON_CALL
+// 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// #ifndef PYTHON_CALL
 // DeepSeek-V2/V3 MLA 参数
 constexpr int BATCH = 4;
 constexpr int H_Q = 128;          // query heads
@@ -10,7 +38,7 @@ constexpr int BLOCK_H = 64;       // heads per thread block
 constexpr int BLOCK_N = 64;       // KV tokens per iteration
 constexpr int SEQ_LEN = 4096;
 // constexpr int MAX_SEQLEN = 8192;
-#endif
+// #endif
 
 #include "kittens.cuh"
 #include "pyutils/pyutils.cuh"
@@ -72,8 +100,8 @@ __device__ bool thread0() {
 
  using GL_Q = gl<bf16, 1, BATCH, H_Q, DV>;
  using GL_QPE = gl<bf16, 1, BATCH, H_Q, DPE>;
- using GL_KV = gl<bf16, 1, BATCH, SEQ_LEN,DV>;
- using GL_KVPE = gl<bf16, 1, BATCH, SEQ_LEN,DPE>;
+ using GL_KV = gl<bf16, 1, BATCH, SEQ_LEN, DV>;
+ using GL_KVPE = gl<bf16, 1, BATCH, SEQ_LEN, DPE>;
 //  using GL_TABLE = gl<int, 1, 1, BATCH, SEQ_LEN>;
  using GL_O = gl<bf16, 1, BATCH, H_Q, DV>;
  using G = kittens::group<NUM_WARPS>;
@@ -99,6 +127,7 @@ void flashmla_paged_decoding(
     GL_KVPE KVPE = GL_KVPE(kvpe_ptr);
     GL_O output = GL_O(output_ptr);
 
+    auto a = Q.raw_ptr;
 
     // Block indices
     const int batch_idx = blockIdx.x;
@@ -112,7 +141,7 @@ void flashmla_paged_decoding(
     shared_allocator al((int*)&__shm[0]);
     
     // Double-buffered KV tiles
-    using ST_Q = st_bf<BLOCK_H, DV + DPE, st_32x32_s>; // 64 * 512
+    using ST_Q = st_bf<BLOCK_H, DV, st_32x32_s>; // 64 * 512
     ST_Q& Q_shared = al.allocate<ST_Q>();
     constexpr auto size__73728 = sizeof(Q_shared); 
                                   // 
@@ -122,7 +151,7 @@ void flashmla_paged_decoding(
     constexpr auto size_S__8192 = sizeof(S_shared); // 8192......
 
  
-    using ST_KV = st_bf<BLOCK_N, DV + DPE, st_16x16_s>;          // KV (V is first DV dims)
+    using ST_KV = st_bf<BLOCK_N, DV, st_16x16_s>;          // KV (V is first DV dims)
     ST_KV (&KV_shared) = al.allocate<ST_KV>();
     constexpr auto size_kv__73728 = sizeof(KV_shared); // 8192......
     constexpr auto total_shared_sizes__155648 = size__73728 + size_S__8192 + size_kv__73728;
@@ -141,28 +170,38 @@ void flashmla_paged_decoding(
 
     // g2r for Q & Q_pe :::[64, 576]
     // G::load(Q_shared, Q, {})
-    G::load(Q_shared, Q, {0, batch_idx, head_group * BLOCK_H, 0});
+    G::load(Q_shared, Q, {0, batch_idx, head_group, 0});
     BARRIER;
     // for k in seq_len // BN
-    const int num_kv_blocks = (SEQ_LEN + BLOCK_N - 1) / BLOCK_N;
+    constexpr int num_kv_blocks = (SEQ_LEN + BLOCK_N - 1) / BLOCK_N;
     rt_bf<16, 32, row_l, rt_16x32_s> A_tile;
     rt_bf<32, 32, row_l, rt_16x32_s> B_tile;
-    rt_fl<32, 128, col_l, rt_32x32_s> o_reg; // 2row, 4col.
-    constexpr int regnum = sizeof(o_reg) / sizeof(float);
+    rt_fl<32, 128, col_l, rt_32x32_s> acc_o; // 2row, 4col.
+    constexpr int regnum = sizeof(acc_o) / sizeof(float);
 
     const int warp_row = warp_id / 2;
     const int warp_col = warp_id % 2;
     
+    neg_infty(max_vec);
+    zero(acc_o);
+    
+    
+    
+    
 
-    for (int k = 0; k < num_kv_blocks; k++){
+    for (int k = 0; k < num_kv_blocks - 2; k++){
         //  KV_shared = T.copy(blocked_kv)::: [64, 576]
-        G::load(KV_shared, KV, {0, batch_idx, k * BLOCK_N, 0});
+        // if(thread0())printf("batch_idx:%d, pos: %d, kv_ptr %p DV: %d\n", batch_idx, k * BLOCK_N, kv_ptr, DV);
+        G::load(KV_shared, KV, {0, batch_idx, k, 0});
+        
+        constexpr float now = 16777216.0 / (4 * 4096 * 512) / 2;
+        constexpr float now2 = 212336640.0 / (4 * 4096 * 512) / 2;
         BARRIER;
         
 
-        // acc_s = T.gemm(Q & KV_shared) ::: [64, 64]
+        // 1. acc_s = T.gemm(Q @ KV_shared) ::: [64, 64]
         zero(acc_s);
-        for(int step = 0; step < 576/32; step += 1){
+        for(int step = 0; step < DV/32; step += 1){
             // load A (16 * 32)
             // load B (32 * 32)
             // C: (16 * 32)
@@ -171,40 +210,47 @@ void flashmla_paged_decoding(
             mma_ABt(acc_s, A_tile, B_tile, acc_s);
             
         }
-        if(k == 0){
-            col_max(max_vec_prev, acc_s);
-        }
-        col_max(max_vec, acc_s, max_vec_prev);
-        sub(max_vec, max_vec, max_vec_prev);
-
+        //TODO: add a gemm for QPE @ KPE here..
+        // 更新最大值
+        // 2.1 max_vec_prev = max_vec
         copy(max_vec_prev, max_vec);
-        // 正确的 online softmax：
-        col_max(max_vec, acc_s, max_vec_prev);       // max_vec = max(col_max(acc_s), max_vec_prev)
-        sub(scale_vec, max_vec_prev, max_vec);       // scale_vec = old_max - new_max
-        exp2(scale_vec, scale_vec);                   // scale = 2^(old - new)
-        // TODO：zty wrong here....
-        // mul_col(o_reg, o_reg, scale_vec);            // rescale output accumulator
-        // mul(sum_vec, sum_vec, scale_vec);            // rescale sum accumulator (如果有)
-        copy(max_vec_prev, max_vec);                  // 更新 max
+        // 2.2 max_vec = T.row_max(acc_s)
+        // 3. max_vec = max(max_vec, max_vec_prev)
+        col_max(max_vec, acc_s, max_vec_prev);
         
+        // 计算缩放因子，作用于归一化分母(sum), 输出(O) acc_s直接减去最大值，然后exp2, 乘上v加起来就行.
+        // 4. scale_vec = max_vec_prev - max_vec
+        sub(scale_vec, max_vec_prev, max_vec);       // scale_vec = old_max - new_max
+        // 5. scale_vec = T.exp2(scores_vec)
+        exp2(scale_vec, scale_vec);      
 
-    //     scores_max = -inf
-    //     scores_max = T.row_max(acc_s)
-    //     scores_max = max(scores_max, scores_max_prev)
-    //     scores_scale = T.exp2(scores_max_prev * scale - scores_max * scale)
-    //     acc_s = T.exp2(acc_s * scale - scores_max * scale)
-    //     scores_sum = T.row_sum(acc_s)
-    //     S_shared = T.copy(acc_s)
-    //     acc_o *= scores_scale
-    //     acc_o = acc_o + S_shared * KV_shared
+        // 6. acc_s -= max_vec 
+        sub(acc_s, max_vec);
+        
+        // 7. acc_s = T.exp2(acc_s)
+        exp2(acc_s, acc_s);
+
+        // 8. acc_s_shared = acc_s 
+        // TODO:
+        
+        // 8.1 scores_sum = T.row_sum(acc_s)
+        // 8.2 logsum *=scale_vec 
+        // 8.3 logsum += scores_sum
+        // 9 acc_o *= scores_vec
+        mul_col(acc_o, acc_o, scale_vec);
+
+        // 10 acc_o = T.gemm(acc_s, KV_shared)
+        mma_AB(acc_o, acc_s, KV_shared, acc_o);
+
     }
     
 
     /* TODO(zty)::::: */ 
+    // 11 final: o_reg /= logsum 
     // div_col(o_reg, o_reg, norm_vec);
     
     rt_fl<128, 32, row_l, rt_32x32_s> o_reg_transposed; // 2row, 4col.
-    transpose(o_reg_transposed, o_reg);
+    transpose(o_reg_transposed, acc_o);
     
     // TODO(zty):::::: 
     // store(output, o_reg_transposed, {0, batch_idx, head_group * BLOCK_H, 0});
