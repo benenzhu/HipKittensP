@@ -286,6 +286,84 @@ __device__ inline static void store(const GL &dst, const RT &src, const COORD &i
 }
 
 
+
+namespace zhuzhustore {
+
+/**
+ * @brief Store data from a register tile to a destination array in global memory with a row-major layout.
+ *
+ * @tparam RT The register tile type with a row-major layout.
+ * @tparam U The data type of the destination array.
+ * @param[out] dst The destination array in global memory to store data into.
+ * @param[in] src The source register tile to store data from.
+ * @param row_stride[in] The stride in elements between rows in the destination array.
+ */
+//  template<int axis, ducks::rt::row_layout RT, ducks::gl::all GL, ducks::coord::tile COORD=coord<RT>>
+    
+
+ constexpr int axis = 2;
+ using RT = rt_fl<64, 64, row_l, rt_16x16_s>;
+ using GL = gl<bf16, 1, 4, 128, 512>;
+ using COORD = coord<RT>;
+ __device__ inline static void store(const GL &dst, const RT &src, const COORD &idx) {
+     using T2 = RT::dtype;
+     using T = base_types::packing<T2>::unpacked_type;
+     using U = typename GL::dtype;
+     using U2 = base_types::packing<U>::packed_type;
+     constexpr int packing = base_types::packing<typename RT::dtype>::num();
+ 
+     U *dst_ptr = (U*)&dst[(idx.template unit_coord<axis, 3>())];
+     const int row_stride = dst.template stride<axis>();
+     int laneid = kittens::laneid();
+ 
+     const int row_offset = laneid%(src.base_tile_rows);
+     const int col_offset = src.base_tile_stride*(laneid/src.base_tile_rows);
+ 
+     uint32_t buffer_size = dst.batch() * dst.depth() * dst.rows() * dst.cols() * sizeof(U);
+     std::uintptr_t as_int = reinterpret_cast<std::uintptr_t>(dst_ptr);
+     std::uint64_t  as_u64 = static_cast<std::uint64_t>(as_int);    // widen if host is 32-bit
+     buffer_resource br = make_buffer_resource(as_u64, buffer_size, 0x00020000);
+ 
+     U2 tmp[4 / packing];
+ 
+     #pragma unroll
+     for(int i = 0; i < src.height; i++) {
+         int row = src.base_tile_rows*i + row_offset;
+         
+         #pragma unroll
+         for(int j = 0; j < src.width; j++) {
+ 
+             #pragma unroll
+             for(int k = 0; k < src.base_tile_num_strides; k++) {
+                 int col = src.base_tile_cols*j + col_offset + k*src.base_tile_elements_per_stride_group;
+                 #pragma unroll
+                 for(int l = 0; l < src.base_tile_stride / packing; l++) {
+                     int idx = l + k * src.base_tile_stride / packing;
+                     tmp[l] = base_types::convertor<U2, T2>::convert(src.tiles[i][j].data[idx]);
+                 }
+ 
+                 if constexpr (std::is_same_v<U2, bf16_2> || std::is_same_v<U2, half_2>) { // bf16_2 or half_2
+ 
+                     // use buffer_store_b64 for stride == 4, dtype == bf16
+                     if constexpr (RT::base_tile_stride == 4) {
+                         uint64_t val = *reinterpret_cast<uint64_t*>(tmp);
+                         llvm_amdgcn_raw_buffer_store_b64(
+                             val,
+                             std::bit_cast<i32x4>(br),
+                             (row*row_stride + col) * sizeof(U),
+                             0,
+                             0
+                         );
+                     // use buffer_store_b128 for stride == 8, dtype == bf16
+                     }
+                 } 
+             }
+         }
+     }
+ }
+}
+
+
 /**
  * @brief Store data from a register tile to a destination array in global memory with a column-major layout.
  *

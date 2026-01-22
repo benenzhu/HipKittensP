@@ -268,7 +268,7 @@ void flashmla_paged_decoding(
 
         // 6. acc_s -= max_vec 
         // TODO(zty)::::
-        // sub(acc_s, max_vec);
+        sub(acc_s_trans, acc_s_trans, max_vec);
         
         // 7. acc_s = T.exp2(acc_s)
         exp2(acc_s, acc_s);
@@ -292,8 +292,8 @@ void flashmla_paged_decoding(
         
         for(int i = 0; i < 4; i++){
             o_scale_vec.data[i][0].x = shared_scale.data[i * 16 + lane_id % 4 * 4];
-            o_scale_vec.data[i][0].x = shared_scale.data[i * 16 + lane_id % 4 * 4 + 1];
-            o_scale_vec.data[i][1].y = shared_scale.data[i * 16 + lane_id % 4 * 4 + 2];
+            o_scale_vec.data[i][0].y = shared_scale.data[i * 16 + lane_id % 4 * 4 + 1];
+            o_scale_vec.data[i][1].x = shared_scale.data[i * 16 + lane_id % 4 * 4 + 2];
             o_scale_vec.data[i][1].y = shared_scale.data[i * 16 + lane_id % 4 * 4 + 3];
         }
 
@@ -320,9 +320,12 @@ void flashmla_paged_decoding(
     
     rt_fl<64, 64, row_l, rt_16x16_s> o_reg_transposed; // 2row, 4col.
     transpose(o_reg_transposed, acc_o);
+    if(thread0()){
+        printf("output1: %lf\n", acc_o.tiles[0][0].data[0].x);
+    }
     
     // TODO(zty):::::: 
-    // store(output, o_reg_transposed, {0, batch_idx, head_group * BLOCK_H, 0});
+    zhuzhustore::store(output, o_reg_transposed, {0, batch_idx, head_group, 0});
 }
 
 // Host-side launcher (for non-RTC usage)

@@ -72,7 +72,7 @@ void micro_tk(bf16* A, bf16* B, bf16* C) {
     }
     
     if constexpr(true) { // test
-        rt_fl<8, 64, row_l, rt_8x64> row_l;
+        rt_fl<8, 64, row_l, rt_8x64_s> row_l;
         using row_vec = decltype(row_l)::row_vec;
         using col_vec = decltype(row_l)::col_vec;
         constexpr int row_vec_size = sizeof(row_vec);

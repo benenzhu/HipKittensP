@@ -263,10 +263,11 @@ def run_kittens_mla():
     kvpe = torch.randn(1, b, SEQ_LEN, dpe__64).cuda().bfloat16().contiguous()
     mla_kittens(grid, block, (q, qpe, kv, kvpe, out), shared_mem=160000)
     print("out") 
-    # print("out", out)
+    print("out", out)
     
-choose = 0
+choose = 1
 if choose == 0:
     ret = test_kittens_gemm_kernel()
 elif choose == 1:
+    out = torch.zeros_like(out)
     run_kittens_mla()
