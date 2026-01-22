@@ -199,6 +199,7 @@ void flashmla_paged_decoding(
     
     neg_infty(max_vec);
     zero(acc_o);
+    zero(log_sum);
     
     
     
@@ -268,10 +269,10 @@ void flashmla_paged_decoding(
 
         // 6. acc_s -= max_vec 
         // TODO(zty)::::
-        sub(acc_s_trans, acc_s_trans, max_vec);
+        sub_col(acc_s_trans, acc_s_trans, max_vec);
         
         // 7. acc_s = T.exp2(acc_s)
-        exp2(acc_s, acc_s);
+        exp2(acc_s_trans, acc_s_trans);
 
         // 8. acc_s_shared = acc_s 
         // TODO(zty):
@@ -279,7 +280,7 @@ void flashmla_paged_decoding(
         
         // 8.1 scores_sum = T.row_sum(acc_s)
         // TODO:
-        // row_sum(scores_sum, acc_s, scores_sum);
+        col_sum(scores_sum, acc_s_trans, scores_sum);
 
         // 8.2 logsum *=scale_vec 
         mul(log_sum, log_sum, scale_vec);
