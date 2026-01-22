@@ -39,15 +39,15 @@ constexpr int ATTN_B = 1;//16; // batch size
 constexpr int ATTN_H = 1;  // number of heads
 #endif
 #ifndef ATTN_D
-constexpr int ATTN_D = 128; // dimension
+constexpr int ATTN_D__128 = 128; // dimension
 #endif
 #ifndef ATTN_F
-constexpr int ATTN_F = 128;  // number of features
+constexpr int ATTN_F__128 = 128;  // number of features
 #endif
 #ifndef ATTN_N
 constexpr int ATTN_N = 64;//1024; // sequence length
 #endif
-constexpr int CHUNK_SIZE = 64;
+constexpr int CHUNK_SIZE__64 = 64;
 
 using namespace kittens;
 
@@ -61,15 +61,15 @@ using G = kittens::group<NUM_WARPS>;
 // template<int ATTN_D, typename T=float, typename L=col_l, typename S=rt_16x32_4_s> using attn_tile = rt<T, CHUNK_SIZE, CHUNK_SIZE, L, S>;
 // template<int ATTN_D, typename T=bf16, typename L=row_l, typename S=rt_32x16_s> using o_tile = rt<T, CHUNK_SIZE, ATTN_D, L, S>;
 // template<int ATTN_D, typename T=bf16, typename L=col_l, typename S=rt_16x32_s> using o_tile_transposed = rt<T, ATTN_D, CHUNK_SIZE, L, S>;
-template<int F, typename T=bf16, typename L=row_l, typename S=rt_32x16_s> using q_tile = rt<T, CHUNK_SIZE, F, L, S>;
-template<int F, typename T=bf16, typename L=col_l, typename S=rt_16x32_s> using q_tile_transposed = rt<T, F, CHUNK_SIZE, L, S>;
-template<int F, typename T=bf16, typename L=row_l, typename S=rt_32x16_s> using k_tile = rt<T, CHUNK_SIZE, F, L, S>;
-template<int D, typename T=bf16, typename L=row_l, typename S=rt_32x16_s> using v_tile = rt<T, CHUNK_SIZE, D, L, S>;
-template<int F, typename T=bf16, typename L=col_l, typename S=rt_16x32_s> using k_tile_transposed = rt<T, F, CHUNK_SIZE, L, S>;
-template<int D, typename T=float, typename L=col_l, typename S=rt_16x32_4_s> using attn_tile = rt<T, CHUNK_SIZE, CHUNK_SIZE, L, S>;
-template<int D, typename T=bf16, typename L=row_l, typename S=rt_32x16_s> using o_tile = rt<T, CHUNK_SIZE, D, L, S>;
-template<int D, typename T=bf16, typename L=col_l, typename S=rt_16x32_s> using o_tile_transposed = rt<T, D, CHUNK_SIZE, L, S>;
-template<int D, typename T=float, typename L=col_l, typename S=rt_16x32_s> using kv_state_tile = rt<T, ATTN_F, ATTN_D, L, S>;
+template<int F, typename T=bf16, typename L=row_l, typename S=rt_32x16_s> using q_tile = rt<T, CHUNK_SIZE__64, F, L, S>;
+template<int F, typename T=bf16, typename L=col_l, typename S=rt_16x32_s> using q_tile_transposed = rt<T, F, CHUNK_SIZE__64, L, S>;
+template<int F, typename T=bf16, typename L=row_l, typename S=rt_32x16_s> using k_tile = rt<T, CHUNK_SIZE__64, F, L, S>;
+template<int D, typename T=bf16, typename L=row_l, typename S=rt_32x16_s> using v_tile = rt<T, CHUNK_SIZE__64, D, L, S>;
+template<int F, typename T=bf16, typename L=col_l, typename S=rt_16x32_s> using k_tile_transposed = rt<T, F, CHUNK_SIZE__64, L, S>;
+template<int D, typename T=float, typename L=col_l, typename S=rt_16x32_4_s> using attn_tile = rt<T, CHUNK_SIZE__64, CHUNK_SIZE__64, L, S>;
+template<int D, typename T=bf16, typename L=row_l, typename S=rt_32x16_s> using o_tile = rt<T, CHUNK_SIZE__64, D, L, S>;
+template<int D, typename T=bf16, typename L=col_l, typename S=rt_16x32_s> using o_tile_transposed = rt<T, D, CHUNK_SIZE__64, L, S>;
+template<int D, typename T=float, typename L=col_l, typename S=rt_16x32_s> using kv_state_tile = rt<T, ATTN_F__128, ATTN_D__128, L, S>;
 
 using _gl_QKVO = gl<bf16, -1, -1, -1, -1>;
 
@@ -125,12 +125,12 @@ struct lightning_attn2_globals {
     size_t dynamic_shared_memory() { return MAX_SHARED_MEMORY; }
 };
 
-__device__ static inline void dump_bits(bf16 * val) {
+__device__ static inline void dump_bits(bf16 * val, const int line_num) {
     float val_f = float(val[0]);
     uint16_t val_bits = *reinterpret_cast<uint16_t*>(val);
 
     // 快速打印核心信息
-    printf("float value: %f → 十六进制: 0x%04X → 二进制：", val_f, val_bits);
+    printf("%d float value: %f → 十六进制: 0x%04X → 二进制：", line_num, val_f, val_bits);
     // 快速输出二进制字符串（16位）
     for (int i = 15; i >= 0; i--) {
         printf("%d", (val_bits >> i) & 1);
@@ -185,20 +185,20 @@ void lightning_attn2_kernel(const lightning_attn2_globals globals, int N)
     shared_allocator al((int*)&__shm[0]);
 
     // smem
-    st_bf<CHUNK_SIZE, ATTN_F, st_32x32_s> (&q_smem)[2] = al.allocate<st_bf<CHUNK_SIZE, ATTN_F, st_32x32_s>, 2>();
-    st_bf<CHUNK_SIZE, ATTN_F, st_32x32_s> (&k_smem)[2] = al.allocate<st_bf<CHUNK_SIZE, ATTN_F, st_32x32_s>, 2>();
-    st_bf<CHUNK_SIZE, ATTN_D, st_32x32_s> (&v_smem)[2] = al.allocate<st_bf<CHUNK_SIZE, ATTN_D, st_32x32_s>, 2>();
+    st_bf<CHUNK_SIZE__64, ATTN_F__128, st_32x32_s> (&q_smem)[2] = al.allocate<st_bf<CHUNK_SIZE__64, ATTN_F__128, st_32x32_s>, 2>();
+    st_bf<CHUNK_SIZE__64, ATTN_F__128, st_32x32_s> (&k_smem)[2] = al.allocate<st_bf<CHUNK_SIZE__64, ATTN_F__128, st_32x32_s>, 2>();
+    st_bf<CHUNK_SIZE__64, ATTN_D__128, st_32x32_s> (&v_smem)[2] = al.allocate<st_bf<CHUNK_SIZE__64, ATTN_D__128, st_32x32_s>, 2>();
     
-    st_bf<ATTN_F, ATTN_D, st_32x32_s> (&kv_state_smem) = al.allocate<st_bf<ATTN_F, ATTN_D, st_32x32_s>>();
+    st_bf<ATTN_F__128, ATTN_D__128, st_32x32_s> (&kv_state_smem) = al.allocate<st_bf<ATTN_F__128, ATTN_D__128, st_32x32_s>>();
 
-    constexpr int sizeof_shared = sizeof(q_smem) + sizeof(k_smem) + sizeof(v_smem) + sizeof(kv_state_smem);// + sizeof(kv_state_smem222);
-    static_assert(sizeof_shared < 160000);
 
-    row_vec<st_fl<ATTN_D, CHUNK_SIZE, st_32x32_s>> (&q_decay) = al.allocate<row_vec<st_fl<ATTN_D, CHUNK_SIZE, st_32x32_s>>>();
-    row_vec<st_fl<ATTN_D, CHUNK_SIZE, st_32x32_s>> (&k_decay) = al.allocate<row_vec<st_fl<ATTN_D, CHUNK_SIZE, st_32x32_s>>>();
+    row_vec<st_fl<ATTN_D__128, CHUNK_SIZE__64, st_32x32_s>> (&q_decay) = al.allocate<row_vec<st_fl<ATTN_D__128, CHUNK_SIZE__64, st_32x32_s>>>();
+    row_vec<st_fl<ATTN_D__128, CHUNK_SIZE__64, st_32x32_s>> (&k_decay) = al.allocate<row_vec<st_fl<ATTN_D__128, CHUNK_SIZE__64, st_32x32_s>>>();
     // decay in register
-    row_vec<rt_fl<ATTN_D, CHUNK_SIZE, col_l, rt_32x32_s>> q_decay_rv;
-    col_vec<rt_fl<CHUNK_SIZE, ATTN_D, col_l, rt_32x32_s>> k_decay_rv;
+    constexpr int sizeof_shared__131584 = sizeof(q_smem) + sizeof(k_smem) + sizeof(v_smem) + sizeof(kv_state_smem) + sizeof(q_decay) + sizeof(k_decay);// + sizeof(kv_state_smem222);
+    static_assert(sizeof_shared__131584 < 160000);
+    row_vec<rt_fl<ATTN_D__128, CHUNK_SIZE__64, col_l, rt_32x32_s>> q_decay_rv;
+    col_vec<rt_fl<CHUNK_SIZE__64, ATTN_D__128, col_l, rt_32x32_s>> k_decay_rv;
 
     const int head_idx = blockIdx.x;
     const int batch_idx = blockIdx.y;
@@ -206,14 +206,14 @@ void lightning_attn2_kernel(const lightning_attn2_globals globals, int N)
     // printf("head_idx %d batch_idx %d slope %f\n", head_idx, batch_idx, slope);
 
 
-    int blocks = N / CHUNK_SIZE;
+    int blocks = N / CHUNK_SIZE__64;
     // printf("blocks: %d\n", blocks);
 
     const int tic = 0, toc = 1;
 
     // Initialize all of the register tiles.
-    q_tile<ATTN_F, bf16> q_reg;                         // [CHUNK_SIZE, ATTN_F], 64x128
-    q_tile<ATTN_F, bf16> q_reg_copy, q_reg_copy2;                         // [CHUNK_SIZE, ATTN_F], 64x128
+    q_tile<ATTN_F__128, bf16> q_reg;                         // [CHUNK_SIZE, ATTN_F], 64x128
+    q_tile<ATTN_F__128, bf16> q_reg_copy, q_reg_copy2;                         // [CHUNK_SIZE, ATTN_F], 64x128
     // q_tile_transposed<ATTN_F, bf16> q_reg_transposed;   // [ATTN_F, CHUNK_SIZE], 128x64, rt_16x32_s, 8x2 subtiles
     // k_tile<ATTN_F, bf16> k_reg;                         // [CHUNK_SIZE, ATTN_F], 64x128
     // k_tile_transposed<ATTN_F, bf16> k_reg_transposed;   // [ATTN_F, CHUNK_SIZE], 128x64
@@ -227,7 +227,7 @@ void lightning_attn2_kernel(const lightning_attn2_globals globals, int N)
     // attn_tile<ATTN_D, bf16, col_l, rt_16x32_4_s> attn_block_bf16_in;    // [64x64], 内部16x32
 
     //template<int D, typename T=float, typename L=col_l, typename S=rt_16x32_s> using kv_state_tile = rt<T, ATTN_F, ATTN_D, L, S>;
-    rt_bf<ATTN_F, ATTN_D, col_l, rt_16x32_s> local_kv_reg; // [ATTN_F, ATTN_D], 8x4 subtiles
+    rt_bf<ATTN_F__128, ATTN_D__128, col_l, rt_16x32_s> local_kv_reg; // [ATTN_F, ATTN_D], 8x4 subtiles
 
 
     
@@ -247,8 +247,8 @@ void lightning_attn2_kernel(const lightning_attn2_globals globals, int N)
     if (blockIdx.x == 0 && blockIdx.y == 0) {
         for (int i = 0; i < 8; i++) {
             if (threadIdx.x == 0 && threadIdx.y == 0){
-                printf("q_smem[0] value %f\n", float(q_smem[0].data[i]));
-                dump_bits(&q_smem[0].data[i]);
+                printf("q_smem[0] value before init, should be random. %f\n", float(q_smem[0].data[i]));
+                dump_bits(&q_smem[0].data[i], __LINE__);
             }
         }
         
@@ -256,12 +256,13 @@ void lightning_attn2_kernel(const lightning_attn2_globals globals, int N)
     if (blockIdx.x == 0 && blockIdx.y == 0) {
         if (threadIdx.x == 0 && threadIdx.y == 0) {
             float q_smem_sum = 0.0f;
-            for (int i = 0; i < ATTN_F * CHUNK_SIZE; i++) {
+            for (int i = 0; i < ATTN_F__128 * CHUNK_SIZE__64; i++) {
                 q_smem_sum += float(q_smem[0].data[i]);
             }
             printf("before init, q_smem_sum %f\n\n", q_smem_sum);
         }
     }
+    __syncthreads();
     __builtin_amdgcn_sched_barrier(0);
     __builtin_amdgcn_s_barrier();
     __builtin_amdgcn_sched_barrier(0);
@@ -283,10 +284,10 @@ void lightning_attn2_kernel(const lightning_attn2_globals globals, int N)
                 printf("q_reg.tiles[0][0].packed_per_thread %d\n", q_reg.tiles[0][0].packed_per_thread); // 4
                 float temp = __bfloat162float((q_reg.tiles[0][0].data[i].x)); // HIP_vector_type<float, 2>
                 printf("q_reg.tiles[0][0].data[%d].x: %f\n", i, temp);
-                dump_bits(&q_reg.tiles[0][0].data[i].x);
+                dump_bits(&q_reg.tiles[0][0].data[i].x, __LINE__);
                 temp = __bfloat162float((q_reg.tiles[0][0].data[i].y));
                 printf("q_reg.tiles[0][0].data[%d].y: %f\n", i, temp);
-                dump_bits(&q_reg.tiles[0][0].data[i].y);
+                dump_bits(&q_reg.tiles[0][0].data[i].y, __LINE__);
             }
         }
         for (int i = 0; i < 4; i++) {
@@ -295,23 +296,23 @@ void lightning_attn2_kernel(const lightning_attn2_globals globals, int N)
                 printf("q_reg_copy.tiles[0][0].packed_per_thread %d\n", q_reg_copy.tiles[0][0].packed_per_thread); // 4
                 float temp = __bfloat162float((q_reg_copy.tiles[0][0].data[i].x)); // HIP_vector_type<float, 2>
                 printf("q_reg_copy.tiles[0][0].data[%d].x: %f\n", i, temp);
-                dump_bits(&q_reg_copy.tiles[0][0].data[i].x);
+                dump_bits(&q_reg_copy.tiles[0][0].data[i].x, __LINE__);
                 temp = __bfloat162float((q_reg_copy.tiles[0][0].data[i].y));
                 printf("q_reg_copy.tiles[0][0].data[%d].y: %f\n", i, temp);
-                dump_bits(&q_reg_copy.tiles[0][0].data[i].y);
+                dump_bits(&q_reg_copy.tiles[0][0].data[i].y, __LINE__);
             }
         }
         for (int i = 0; i < 8; i++) {
             if (threadIdx.x == 0 && threadIdx.y == 0){
-                printf("q_smem[0] value %f\n", float(q_smem[0].data[i]));
-                dump_bits(&q_smem[0].data[i]);
+                printf("q_smem[0] value should be 1 here %f\n", float(q_smem[0].data[i]));
+                dump_bits(&q_smem[0].data[i], __LINE__);
             }
         }
     }
     if (blockIdx.x == 0 && blockIdx.y == 0) {
         if (threadIdx.x == 0 && threadIdx.y == 0) {
             float q_smem_sum = 0.0f;
-            for (int i = 0; i < ATTN_F * CHUNK_SIZE; i++) {
+            for (int i = 0; i < ATTN_F__128 * CHUNK_SIZE__64; i++) {
                 q_smem_sum += float(q_smem[0].data[i]);
             }
             printf("after init, q_smem_sum %f\n\n", q_smem_sum);
@@ -368,23 +369,23 @@ void lightning_attn2_kernel(const lightning_attn2_globals globals, int N)
                 float temp = __bfloat162float((q_reg_copy2.tiles[0][0].data[i].x)); // HIP_vector_type<float, 2>
                 printf("q_reg_copy2.tiles[0][0].data[%d].x: %f\n", i, temp);
                 // uint16_t val_bits = *reinterpret_cast<uint16_t*>(&q_reg.tiles[0][0].data[i].x);
-                dump_bits(&q_reg_copy2.tiles[0][0].data[i].x);
+                dump_bits(&q_reg_copy2.tiles[0][0].data[i].x, __LINE__);
                 temp = __bfloat162float((q_reg_copy2.tiles[0][0].data[i].y));
                 printf("q_reg_copy2.tiles[0][0].data[%d].y: %f\n", i, temp);
-                dump_bits(&q_reg_copy2.tiles[0][0].data[i].y);
+                dump_bits(&q_reg_copy2.tiles[0][0].data[i].y, __LINE__);
             }
         }
         for (int i = 0; i < 8; i++) {
             if (threadIdx.x == 0 && threadIdx.y == 0) {
                 printf("q_smem[0] value %f\n", float(q_smem[0].data[i]));
-                dump_bits(&q_smem[0].data[i]);
+                dump_bits(&q_smem[0].data[i], __LINE__);
             }
         }
     }
     if (blockIdx.x == 0 && blockIdx.y == 0) {
         if (threadIdx.x == 0 && threadIdx.y == 0) {
             float q_smem_sum = 0.0f;
-            for (int i = 0; i < ATTN_F * CHUNK_SIZE; i++) {
+            for (int i = 0; i < ATTN_F__128 * CHUNK_SIZE__64; i++) {
                 q_smem_sum += float(q_smem[0].data[i]);
             }
             printf("after reload q_smem to q_reg, q_smem_sum %f\n\n", q_smem_sum);
@@ -400,6 +401,14 @@ void lightning_attn2_kernel(const lightning_attn2_globals globals, int N)
     ones(local_kv_reg);
     store(kv_state_smem, local_kv_reg);
     asm volatile("s_waitcnt lgkmcnt(0)" ::: "memory"); // 等待所有共享内存操作完成 (必加)
+    __syncthreads();
+    auto now = sizeof(kv_state_smem);
+    // if(threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.y == 0 && blockIdx.x == 0 && blockIdx.y == 0){
+    //     for(int i = 0; i < sizeof(kv_state_smem) / 2; i++) {
+    //         dump_bits(kv_state_smem.data + i, __LINE__);
+    //     }
+    // }
+    __syncthreads();
     __builtin_amdgcn_s_barrier();                      // block内全线程栅栏同步 (必加)
     
 #ifdef DEBUG
@@ -411,23 +420,26 @@ void lightning_attn2_kernel(const lightning_attn2_globals globals, int N)
                 printf("local_kv_reg.tiles[0][0].packed_per_thread %d\n", local_kv_reg.tiles[0][0].packed_per_thread); // 4
                 float temp = __bfloat162float((local_kv_reg.tiles[0][0].data[i].x)); // HIP_vector_type<float, 2>
                 printf("local_kv_reg.tiles[0][0].data[%d].x: %f\n", i, temp);
-                dump_bits(&local_kv_reg.tiles[0][0].data[i].x);
+                dump_bits(&local_kv_reg.tiles[0][0].data[i].x, __LINE__);
                 temp = __bfloat162float((local_kv_reg.tiles[0][0].data[i].y));
                 printf("local_kv_reg.tiles[0][0].data[%d].y: %f\n", i, temp);
-                dump_bits(&local_kv_reg.tiles[0][0].data[i].y);
+                dump_bits(&local_kv_reg.tiles[0][0].data[i].y, __LINE__);
             }
         }
         for (int i = 0; i < 8; i++) {
             if (threadIdx.x == 0 && threadIdx.y == 0){
                 printf("kv_state_smem %f\n", float(kv_state_smem.data[i]));
-                dump_bits(&kv_state_smem.data[i]);
+                dump_bits(&kv_state_smem.data[i], __LINE__);
             }
         }
     }
 #endif
     
     // load from st to rt back
-    load(local_kv_reg, kv_state_smem);
+    asm volatile("s_waitcnt lgkmcnt(0)" ::: "memory"); // 等待所有共享内存操作完成 (必加)
+    load222(local_kv_reg, kv_state_smem);
+    asm volatile("s_waitcnt lgkmcnt(0)" ::: "memory"); // 等待所有共享内存操作完成 (必加)
+    __syncthreads();
 #ifdef DEBUG
         if (blockIdx.x == 0 && blockIdx.y == 0) {
             // tile[0][0]
@@ -435,19 +447,19 @@ void lightning_attn2_kernel(const lightning_attn2_globals globals, int N)
                 if (threadIdx.x == 0 && threadIdx.y == 0) {
                     printf("local_kv_reg height %d width %d\n", local_kv_reg.height, local_kv_reg.width); // 8, 4
                     printf("local_kv_reg.tiles[0][0].data length: %zu\n", sizeof(local_kv_reg.tiles[0][0].data)/sizeof(float));
-                    float temp = __bfloat162float((local_kv_reg.tiles[0][0].data[i].x)); // HIP_vector_type<float, 2>
+                    float temp = float((local_kv_reg.tiles[0][0].data[i].x)); // HIP_vector_type<float, 2>
                     printf("local_kv_reg.tiles[0][0].data[%d].x: %f\n", i, temp);
                     // uint16_t val_bits = *reinterpret_cast<uint16_t*>(&local_kv_reg.tiles[0][0].data[i].x);
-                    dump_bits(&local_kv_reg.tiles[0][0].data[i].x);
-                    temp = __bfloat162float((local_kv_reg.tiles[0][0].data[i].y));
+                    dump_bits(&local_kv_reg.tiles[0][0].data[i].x, __LINE__);
+                    temp = float((local_kv_reg.tiles[0][0].data[i].y));
                     printf("local_kv_reg.tiles[0][0].data[%d].y: %f\n", i, temp);
-                    dump_bits(&local_kv_reg.tiles[0][0].data[i].y);
+                    dump_bits(&local_kv_reg.tiles[0][0].data[i].y, __LINE__);
                 }
             }
             for (int i = 0; i < 8; i++) {
                 if (threadIdx.x == 0 && threadIdx.y == 0){
                     printf("kv_state_smem %f\n", float(kv_state_smem.data[i]));
-                    dump_bits(&kv_state_smem.data[i]);
+                    dump_bits(&kv_state_smem.data[i], __LINE__);
                 }
             }
         }
@@ -932,14 +944,14 @@ lightning_attn2_globals lightning_attn2_init(
     // _gl_QKVO             k_split_arg{d_k, B, H, N, ATTN_F}; 
     // _gl_QKVO             v_arg{d_v, B, H, N, ATTN_D};
     // _gl_QKVO             o_arg{d_o, B, H, N, ATTN_D};
-    _gl_QKVO             q_arg{d_q, B, N, H, ATTN_F};
-    _gl_QKVO             k_arg{d_k, B, N, H, ATTN_F};
-    _gl_QKVO             k_split_arg{d_k, B, N, H, ATTN_F}; 
-    _gl_QKVO             v_arg{d_v, B, N, H, ATTN_D};
-    _gl_QKVO             o_arg{d_o, B, N, H, ATTN_D};
+    _gl_QKVO             q_arg{d_q, B, N, H, ATTN_F__128};
+    _gl_QKVO             k_arg{d_k, B, N, H, ATTN_F__128};
+    _gl_QKVO             k_split_arg{d_k, B, N, H, ATTN_F__128}; 
+    _gl_QKVO             v_arg{d_v, B, N, H, ATTN_D__128};
+    _gl_QKVO             o_arg{d_o, B, N, H, ATTN_D__128};
 
     // debug dump
-    _gl_QKVO            odebug_arg{d_debug_o, B, N, H, ATTN_D};
+    _gl_QKVO            odebug_arg{d_debug_o, B, N, H, ATTN_D__128};
 
     globals g{
         q_arg, k_arg, k_split_arg, v_arg, o_arg,
