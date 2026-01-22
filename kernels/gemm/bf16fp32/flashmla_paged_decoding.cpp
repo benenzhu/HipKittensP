@@ -151,7 +151,7 @@ void flashmla_paged_decoding(
     using ST_KV = st_bf<BLOCK_N__64, DV__512, st_16x16_s>;          // KV (V is first DV dims)
     ST_KV (&shared_KV) = al.allocate<ST_KV>();
     
-    using ST_ACC_S = st_bf<BLOCK_H__64, BLOCK_N__64, st_16x16_s>;
+    using ST_ACC_S = st_fl<BLOCK_H__64, BLOCK_N__64, st_16x16_s>;
     ST_ACC_S& shared_s = al.allocate<ST_ACC_S>();
     
 
@@ -214,7 +214,32 @@ void flashmla_paged_decoding(
             mma_ABt(acc_s, A_tile, B_tile, acc_s);
             
         }
-        store(subtile_inplace<16, 32>(shared_s, {warp_row, warp_col}), acc_s);
+        
+        // acc_s layout: [16,32] col
+        
+        
+        auto r2s = [&](){
+            for(int i = 0; i < acc_s.width; i++){
+                shared_s.data[(warp_row * 16 + lane_id % 4 * 4 + 2 * i) * 64 + warp_col * 16 + lane_id / 4] = acc_s.tiles[0][i].data[0].x;
+                shared_s.data[(warp_row * 16 + lane_id % 4 * 4 + 2 * i + 1) * 64 + warp_col * 16 + lane_id / 4] = acc_s.tiles[0][i].data[0].x;
+            }
+        };
+        r2s();
+        __syncthreads();
+        
+        auto s2r = [&]() {
+            for(int i = 0; i < 4; i++){
+                acc_s_trans.tiles[0][0].data[i].x = shared_s.data[(warp_id * 8 + lane_id / 8) * 64 + (lane_id % 8) * 8 + i * 2];
+                acc_s_trans.tiles[0][0].data[i].y = shared_s.data[(warp_id * 8 + lane_id / 8) * 64 + (lane_id % 8) * 8 + i * 2 + 1];
+            }
+        };
+        s2r();
+        
+        
+
+        // need to trans to [8, 64] col/row
+
+        // store(subtile_inplace<16, 32>(shared_s, {warp_row, warp_col}), acc_s);
 
         //TODO: add a gemm for QPE @ KPE here..
         // 更新最大值

@@ -442,6 +442,78 @@ __device__ static inline void mma_ABt(D &d,
         }
     }
 }
+
+
+
+// namespace zz {
+// template<ducks::rt::col_layout D, ducks::rt::row_layout A, ducks::rt::row_layout B, ducks::rt::col_layout C>
+__device__ static inline void mma_ABt_zty(rt_fl<16, 32, col_l> &d,
+                                const rt_bf<16, 32, row_l, rt_16x32_s> &a,
+                                const rt_bf<32, 32, row_l, rt_16x32_s> &b, // notice row and (M, K) instead of col and (K, M)
+                                const rt_fl<16, 32, col_l> &c) {
+
+    using D = rt_fl<16, 32, col_l>; 
+    using A = rt_bf<16, 32, row_l, rt_16x32_s>;
+    using B = rt_bf<32, 32, row_l, rt_16x32_s>;
+    using C = D;
+    static_assert(D::rows == A::rows && D::cols == B::rows); // Check D matches A, B
+    static_assert(A::cols == B::cols); // Check reduction dim is same
+    static_assert(D::rows == C::rows && D::cols == C::cols); // Check D matches C
+    
+    // // --------- shapes start
+    // static_assert(D::rows == 64);
+    // static_assert(D::cols == 32);
+
+    // static_assert(A::rows == 64);
+    // static_assert(A::cols == 64);
+    // static_assert(B::rows == 32);
+    // static_assert(B::cols == 64);
+
+    // static_assert(std::is_same_v<typename D::T, float>);
+    // static_assert(std::is_same_v<typename A::T, bf16>);
+    // static_assert(std::is_same_v<typename B::T, bf16>);
+    // --------- shapes end
+
+    
+
+    static_assert(
+        (std::is_same_v<typename D::T, float> && std::is_same_v<typename A::T, bf16> &&
+            std::is_same_v<typename B::T, bf16> && std::is_same_v<typename C::T, float>) ||
+        (std::is_same_v<typename D::T, half> && std::is_same_v<typename A::T, half> &&
+            std::is_same_v<typename B::T, half> && std::is_same_v<typename C::T, half>) ||
+        (std::is_same_v<typename D::T, float> && std::is_same_v<typename A::T, fp8e4m3> &&
+            std::is_same_v<typename B::T, fp8e4m3> && std::is_same_v<typename C::T, float>)
+    );
+    
+
+    
+    // static_assert(D::height == 4);
+    // static_assert(D::width == 2);
+    // static_assert(A::width == 2);
+
+    #pragma unroll
+    for(int n = 0; n < D::height; n++) {
+        #pragma unroll
+        for(int m = 0; m < D::width; m++) {
+            mma_ABt_base(
+                d.tiles[n][m],
+                a.tiles[n][0],
+                b.tiles[m][0],
+                c.tiles[n][m]
+            );
+            #pragma unroll
+            for(int k = 1; k < A::width; k++) {
+                mma_ABt_base(
+                    d.tiles[n][m],
+                    a.tiles[n][k],
+                    b.tiles[m][k],
+                    d.tiles[n][m]
+                );
+            }
+        }
+    }
+};
+// };
 /**
  * @brief Matrix multiply-accumulate operation with transposed A.
  *

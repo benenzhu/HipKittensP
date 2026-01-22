@@ -73,7 +73,7 @@ def bench_kernel(fn, M, N, K, warmup=100, rep=500, use_cuda_graph=False):
     return latency_ms, tflops
 
 
-def test_kittens_kernel(): 
+def test_kittens_gemm_kernel(): 
     M, N, K = 2048, 4096, 8192
     A = torch.randn(M, K).cuda().bfloat16().contiguous() * 0.1
     B = torch.randn(N, K).cuda().bfloat16().contiguous() * 0.1
@@ -83,7 +83,7 @@ def test_kittens_kernel():
     
     grid = (M // 256 * (N // 256), 1, 1)
     grid = (1,1,1)
-    block = (512, 1, 1)
+    block = (64, 1, 1)
     
     # Define kernel launch function
     def kittens_fn():
@@ -121,7 +121,6 @@ def test_kittens_kernel():
     return C
 
 
-# ret = test_kittens_kernel()
 
 
 def scaled_dot_product_attention(query, key, value, h_q, h_kv, is_causal=False):
@@ -265,5 +264,9 @@ def run_kittens_mla():
     mla_kittens(grid, block, (q, qpe, kv, kvpe, out), shared_mem=160000)
     print("out") 
     # print("out", out)
-
-run_kittens_mla()
+    
+choose = 0
+if choose == 0:
+    ret = test_kittens_gemm_kernel()
+elif choose == 1:
+    run_kittens_mla()

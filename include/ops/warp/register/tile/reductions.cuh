@@ -231,6 +231,77 @@ __device__ static inline void col_reduce(V &col_accum, const T &src, const V &sr
         }
     }
 }
+
+namespace zz2 {
+#ifndef hip_rtc
+    // template<typename op, ducks::rv::all V, ducks::rt::row_layout T, bool reset>
+    using op =  base_ops::max;
+    using T = rt_fl<16, 32, col_l>;
+    using V = T::row_vec;
+    constexpr auto sizeofrow__8 = sizeof(T::row_vec);
+    constexpr auto sizeofcol__16 = sizeof(T::col_vec);
+    constexpr auto reset = true;
+    __device__ static inline void col_reduce(V &col_accum, const T &src, const V &src_accum) {
+        // I actually like these static asserts because they give more verbose errors when things go wrong.
+        static_assert(std::is_same_v<typename V::layout, typename rt_base<typename T::T, typename T::layout, typename T::shape>::row_vec_layout>); // compatible layout
+        static_assert(std::is_same_v<typename V::dtype, typename T::dtype>); // compatible type
+        static_assert(V::outer_dim == T::width); // compatible size
+    
+        using RT2 = V::dtype;
+        using RT = base_types::packing<RT2>::unpacked_type;
+    
+        static_assert(!std::is_same_v<RT, fp8e4m3>, "Unsupported type for reduction");
+    
+        const int leader = (laneid() / T::base_tile_rows) * T::base_tile_rows;
+        constexpr int packed_per_tile = T::packed_per_base_tile;
+        constexpr int max_shift = T::base_tile_rows / 2;
+    
+        RT2 accum[packed_per_tile];
+    
+        #pragma unroll
+        for(int j = 0; j < src.width; j++) {
+            #pragma unroll
+            for(int k = 0; k < packed_per_tile; k++) {
+                accum[k] = src.tiles[0][j].data[k];
+            }
+            #pragma unroll
+            for(int i = 1; i < src.height; i++) {
+                #pragma unroll
+                for(int k = 0; k < packed_per_tile; k++) {
+                    accum[k] = op::template op<RT2>(accum[k], src.tiles[i][j].data[k]);
+                }
+            }
+    
+            #pragma unroll
+            for(int k = 0; k < packed_per_tile; k++) {
+                for (int shift = max_shift; shift > 0; shift /= 2) {
+                    accum[k] = op::template op<RT2>(accum[k], packed_shfl_down(MASK_ALL, accum[k], shift));
+                }
+            }
+    
+            if constexpr (reset) {
+                #pragma unroll
+                for(int k = 0; k < packed_per_tile; k++) {
+                    col_accum[j][k] = accum[k];
+                }
+            }
+            else {
+                #pragma unroll
+                for(int k = 0; k < packed_per_tile; k++) {
+                    col_accum[j][k] = op::template op<RT2>(src_accum[j][k], accum[k]);
+                }
+            }
+    
+            #pragma unroll
+            for(int k = 0; k < packed_per_tile; k++) {
+                col_accum[j][k] = packed_shfl(MASK_ALL, col_accum[j][k], leader);
+            }
+        }
+    }
+#endif
+};
+
+
 /**
  * @brief Perform a column-wise reduction on a matrix in column-major layout.
  *

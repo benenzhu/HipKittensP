@@ -71,6 +71,42 @@ void micro_tk(bf16* A, bf16* B, bf16* C) {
         printf("zhuzhu\n");
     }
     
+    if constexpr(true) { // test
+        rt_fl<8, 64, row_l, rt_8x64> row_l;
+        using row_vec = decltype(row_l)::row_vec;
+        using col_vec = decltype(row_l)::col_vec;
+        constexpr int row_vec_size = sizeof(row_vec);
+        constexpr int col_vec_size = sizeof(col_vec);
+        
+
+
+        for(int i = 0; i < row_l.height; i++){
+            for(int j = 0; j < row_l.width; j++){
+                for(int k = 0; k < row_l.packed_per_thread; k++){
+                    row_l.tiles[i][j].data[k].x = threadIdx.x;
+                    row_l.tiles[i][j].data[k].y = threadIdx.x;
+                }
+            }
+            
+        }
+
+        col_vec col_max_vec;
+        row_vec row_max_vec;
+        col_max(row_max_vec, row_l);
+        row_max(col_max_vec, row_l);
+        
+        for(int i = 0; i < 1; i++){
+            printf("col_max: tid: %d i: %d, value:%lf\n",threadIdx.x, i, col_max_vec.data[0][0]);
+        }
+        
+        for(int i = 0; i < 1; i++){
+            printf("row_max: x: tid: %d i: %d, value:%lf\n",threadIdx.x, i, row_max_vec.data[0][i].x);
+            printf("row_max: y: tid: %d i: %d, value:%lf\n",threadIdx.x, i, row_max_vec.data[0][i].y);
+        }
+    }
+    
+    return;
+    
     extern __shared__ alignment_dummy __shm[];
     shared_allocator al((int*)&__shm[0]);
     constexpr int ATTN_D = 128;
