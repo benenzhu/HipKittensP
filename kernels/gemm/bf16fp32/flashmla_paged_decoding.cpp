@@ -151,8 +151,15 @@ void flashmla_paged_decoding(
     using ST_KV = st_bf<BLOCK_N__64, DV__512, st_16x16_s>;          // KV (V is first DV dims)
     ST_KV (&shared_KV) = al.allocate<ST_KV>();
     
-    using ST_ACC_S = st_fl<BLOCK_H__64, BLOCK_N__64, st_16x16_s>;
+    using ST_ACC_S = st_bf<BLOCK_H__64, BLOCK_N__64, st_16x16_s>;
     ST_ACC_S& shared_s = al.allocate<ST_ACC_S>();
+    
+    struct ___{
+       float data[64];
+    };
+    
+    
+    ___& shared_scale = al.allocate<___>();
     
 
     constexpr auto total_shared_sizes__147456 = sizeof(Q_shared) + sizeof(S_shared) + sizeof(shared_KV) + sizeof(shared_s);
@@ -162,12 +169,10 @@ void flashmla_paged_decoding(
 
 
     // 64 * 64 / 8 = 32 * 16
-    rt_fl<16, 32, col_l> acc_s;
-    rt_fl<8, 64, col_l, rt_8x64> acc_s_trans;
-    typename decltype(acc_s)::row_vec max_vec, max_vec_prev, scores_sum, scale_vec, log_sum;
-    zero(acc_s);
-    zero(max_vec);
-    ones(scale_vec);
+    rt_fl<16, 32, col_l, rt_16x16_s> acc_s;
+    rt_fl<8, 64, col_l, rt_8x64_s> acc_s_trans;
+    
+    //  8 * 32
     
 
     // g2r for Q & Q_pe :::[64, 576]
@@ -178,10 +183,16 @@ void flashmla_paged_decoding(
     constexpr int num_kv_blocks = (SEQ_LEN + BLOCK_N__64 - 1) / BLOCK_N__64;
     rt_bf<16, 32, row_l, rt_16x32_s> A_tile;
     rt_bf<32, 32, row_l, rt_16x32_s> B_tile;
-    rt_bf<64, 64, row_l, rt_32x16_s> A2_tile;
-    rt_bf<64, 64, row_l, rt_32x16_s> B2_tile;
-    rt_fl<64, 64, col_l, rt_32x32_s> acc_o; // 2row, 4col.
-    constexpr int regnum = sizeof(acc_o) / sizeof(float);
+    rt_bf<64, 64, row_l, rt_16x32_s> A2_tile;
+    rt_bf<64, 64, row_l, rt_16x32_s> B2_tile;
+    rt_fl<64, 64, col_l, rt_16x16_s> acc_o; // 2row, 4col.
+    typename decltype(acc_s_trans)::row_vec max_vec, max_vec_prev, scores_sum, log_sum, scale_vec;
+    typename decltype(acc_o)::col_vec o_scale_vec, o_scores_sum;
+    zero(acc_s);
+    zero(max_vec);
+    ones(scale_vec);
+    constexpr auto now___ = sizeof(max_vec);
+    constexpr int regnum = sizeof(acc_o) / sizeof(float); 
 
     const int warp_row = warp_id / 2;
     const int warp_col = warp_id % 2;
@@ -229,8 +240,8 @@ void flashmla_paged_decoding(
         
         auto s2r = [&]() {
             for(int i = 0; i < 4; i++){
-                acc_s_trans.tiles[0][0].data[i].x = shared_s.data[(warp_id * 8 + lane_id / 8) * 64 + (lane_id % 8) * 8 + i * 2];
-                acc_s_trans.tiles[0][0].data[i].y = shared_s.data[(warp_id * 8 + lane_id / 8) * 64 + (lane_id % 8) * 8 + i * 2 + 1];
+                acc_s_trans.tiles[0][0].data[i].x = shared_s.data[(warp_id * 8 + lane_id % 8) * 64 + (lane_id / 8) * 8 + i * 2];
+                acc_s_trans.tiles[0][0].data[i].y = shared_s.data[(warp_id * 8 + lane_id % 8) * 64 + (lane_id / 8) * 8 + i * 2 + 1];
             }
         };
         s2r();
@@ -247,7 +258,7 @@ void flashmla_paged_decoding(
         copy(max_vec_prev, max_vec);
         // 2.2 max_vec = T.row_max(acc_s)
         // 3. max_vec = max(max_vec, max_vec_prev)
-        col_max(max_vec, acc_s, max_vec_prev);
+        col_max(max_vec, acc_s_trans, max_vec_prev);
         
         // 计算缩放因子，作用于归一化分母(sum), 输出(O) acc_s直接减去最大值，然后exp2, 乘上v加起来就行.
         // 4. scale_vec = max_vec_prev - max_vec
@@ -275,7 +286,22 @@ void flashmla_paged_decoding(
         // 8.3 logsum += scores_sum
         add(log_sum, log_sum, scores_sum);
         // 9 acc_o *= scores_vec
-        mul_col(acc_o, acc_o, scale_vec);
+        if(lane_id / 8 == 0) shared_scale.data[warp_id * 8 + lane_id / 8] = scale_vec.data[0][0];
+        __syncthreads();
+        
+        
+        for(int i = 0; i < 4; i++){
+            o_scale_vec.data[i][0].x = shared_scale.data[i * 16 + lane_id % 4 * 4];
+            o_scale_vec.data[i][0].x = shared_scale.data[i * 16 + lane_id % 4 * 4 + 1];
+            o_scale_vec.data[i][1].y = shared_scale.data[i * 16 + lane_id % 4 * 4 + 2];
+            o_scale_vec.data[i][1].y = shared_scale.data[i * 16 + lane_id % 4 * 4 + 3];
+        }
+
+
+        
+        
+
+        mul_row(acc_o, acc_o, o_scale_vec);
 
         // 10 acc_o = T.gemm(acc_s, KV_shared)
         // acc_o 分工： <64, 64 * 8>
@@ -290,9 +316,9 @@ void flashmla_paged_decoding(
     }
     
 
-    div_col(acc_o, acc_o, scores_sum);
+    div_row(acc_o, acc_o, o_scores_sum);
     
-    rt_fl<64, 64, row_l, rt_32x32_s> o_reg_transposed; // 2row, 4col.
+    rt_fl<64, 64, row_l, rt_16x16_s> o_reg_transposed; // 2row, 4col.
     transpose(o_reg_transposed, acc_o);
     
     // TODO(zty):::::: 
