@@ -213,7 +213,7 @@ def ref_mla_decode(q, blocked_kv, block_table, cache_seqlens, h_q, h_kv, d, dv, 
 
 if True:
     # DeepSeek-V2/V3 MLA 参数
-    b = 4           # batch size
+    b = 1           # batch size
     s_q__1 = 1         # decode 阶段 query 长度为 1
     h_q__128 = 128       # query heads
     h_kv = 1        # kv heads (MLA absorb 后)

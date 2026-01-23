@@ -142,7 +142,7 @@ void flashmla_paged_decoding(
     
     // Double-buffered KV tiles
     using ST_Q = st_bf<BLOCK_H__64, DV__512, st_32x32_s>; // 64 * 512
-    ST_Q& Q_shared = al.allocate<ST_Q>();
+    ST_Q& shared_Q = al.allocate<ST_Q>();
 
     using ST_S = st_bf<BLOCK_H__64, BLOCK_N__64, st_16x16_s>;
     ST_S& S_shared = al.allocate<ST_S>();
@@ -162,7 +162,7 @@ void flashmla_paged_decoding(
     ___& shared_scale = al.allocate<___>();
     
 
-    constexpr auto total_shared_sizes__147456 = sizeof(Q_shared) + sizeof(S_shared) + sizeof(shared_KV) + sizeof(shared_s);
+    constexpr auto total_shared_sizes__147456 = sizeof(shared_Q) + sizeof(S_shared) + sizeof(shared_KV) + sizeof(shared_s);
                                 
     static_assert(total_shared_sizes__147456 <= 160000, "Shared memory size exceeds 160KB");
     
@@ -177,7 +177,7 @@ void flashmla_paged_decoding(
 
     // g2r for Q & Q_pe :::[64, 576]
     // G::load(Q_shared, Q, {})
-    G::load(Q_shared, Q, {0, batch_idx, head_group, 0});
+    G::load(shared_Q, Q, {0, batch_idx, head_group, 0});
     BARRIER;
     // for k in seq_len // BN
     constexpr int num_kv_blocks = (SEQ_LEN + BLOCK_N__64 - 1) / BLOCK_N__64;
@@ -221,7 +221,7 @@ void flashmla_paged_decoding(
             // load A (16 * 32)
             // load B (32 * 32)
             // C: (16 * 32)
-            load(A_tile, subtile_inplace<16, 32>(Q_shared, {warp_row, step}));
+            load(A_tile, subtile_inplace<16, 32>(shared_Q, {warp_row, step}));
             load(B_tile, subtile_inplace<32, 32>(shared_KV, {warp_col, step}));
             mma_ABt(acc_s, A_tile, B_tile, acc_s);
             
