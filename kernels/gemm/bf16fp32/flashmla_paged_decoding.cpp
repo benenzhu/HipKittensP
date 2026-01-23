@@ -141,7 +141,7 @@ void flashmla_paged_decoding(
     shared_allocator al((int*)&__shm[0]);
     
     // Double-buffered KV tiles
-    using ST_Q = st_bf<BLOCK_H__64, DV__512, st_32x32_s>; // 64 * 512
+    using ST_Q = st_bf<BLOCK_H__64, DV__512, st_16x32_s>; // 64 * 512
     ST_Q& shared_Q = al.allocate<ST_Q>();
 
     using ST_S = st_bf<BLOCK_H__64, BLOCK_N__64, st_16x16_s>;
@@ -221,10 +221,29 @@ void flashmla_paged_decoding(
             // load A (16 * 32)
             // load B (32 * 32)
             // C: (16 * 32)
+            // auto ret = subtile_inplace<16, 32>(shared_Q, {warp_row, step});
             load(A_tile, subtile_inplace<16, 32>(shared_Q, {warp_row, step}));
             load(B_tile, subtile_inplace<32, 32>(shared_KV, {warp_col, step}));
+            BARRIER;
+            if(thread0() && step == 0 && k == 0){
+                printf("A_tile result: %lf \n", float(A_tile.tiles[0][0].data[0].x));
+                float shared_Q_sum = 0;
+                for(int i = 0; i < 32768; i++){
+                    shared_Q_sum += float(shared_Q.data[i]);
+                }
+                printf("shared result: %lf \n", float(shared_Q.data[0]));
+                printf("shared sum: %lf \n", float(shared_Q_sum));
+            }
             mma_ABt(acc_s, A_tile, B_tile, acc_s);
             
+        }
+        if(thread0() && k == 0){
+            printf("acc_s result: %lf \n", acc_s.tiles[0][0].data[0].x);
+            printf("acc_s result: %lf \n", acc_s.tiles[0][0].data[0].y);
+            printf("acc_s result: %lf \n", acc_s.tiles[0][0].data[1].x);
+            printf("acc_s result: %lf \n", acc_s.tiles[0][0].data[1].y);
+            printf("A_tile result: %lf \n", float(A_tile.tiles[0][0].data[0].x));
+            printf("shared_Q result: %lf \n", float(shared_Q.data[0]));
         }
         
         // acc_s layout: [16,32] col

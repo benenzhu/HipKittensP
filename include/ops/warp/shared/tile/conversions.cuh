@@ -30,6 +30,9 @@ __device__ inline st_subtile<ST, subtile_rows, subtile_cols> subtile_inplace(ST 
     using T = typename ST::dtype;
     static_assert(ST::rows % subtile_rows == 0);
     static_assert(ST::cols % subtile_cols == 0);
+    // add this for load(RT, ST), it will be zeros lines to load somehow...
+    // from (zty) add...
+    static_assert(subtile_rows >= ST::underlying_subtile_rows); 
     static_assert(ST::rows == ST::underlying_rows && ST::cols == ST::underlying_cols); // must be a real ST, no recursive subtiles.
     return st_subtile<ST, subtile_rows, subtile_cols>(src, rowcol);
 }

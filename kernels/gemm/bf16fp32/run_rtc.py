@@ -12,13 +12,16 @@ import importlib
 import rtc
 import os
 import math
+import flashmla_paged_decoding_ref
 
 importlib.reload(rtc)
+importlib.reload(flashmla_paged_decoding_ref)
 # import tritonblas
 # importlib.reload(tritonblas)
 # from tritonblas.matmul import persistent_matmul_lt
 # importlib.reload(tritonblas.matmul)
 from rtc import _compile_kernel, get_triton_gemm_NTN, my_assert_close, log, get_kernel
+from flashmla_paged_decoding_ref import flashmla_ref_full, flashmla_ref_online
 torch.set_printoptions(threshold=1000, edgeitems=3, sci_mode=False)     
 
 
@@ -257,17 +260,54 @@ def run_kittens_mla():
     grid = (1, 1, 1)
     block = (512, 1, 1)
     SEQ_LEN = 4096
-    q = torch.randn(b, s_q__1, h_q__128, dv__512).cuda().bfloat16().contiguous()
+    q = torch.randn(b, s_q__1, h_q__128, dv__512).cuda().bfloat16().contiguous() * 0.0 + 1
     qpe = torch.randn(b, s_q__1, h_q__128, dpe__64).cuda().bfloat16().contiguous()
-    kv = torch.randn(1, b, SEQ_LEN, dv__512).cuda().bfloat16().contiguous()
+    kv = torch.randn(1, b, SEQ_LEN, dv__512).cuda().bfloat16().contiguous() * 0.0 + 1
     kvpe = torch.randn(1, b, SEQ_LEN, dpe__64).cuda().bfloat16().contiguous()
-    mla_kittens(grid, block, (q, qpe, kv, kvpe, out), shared_mem=160000)
+    out_kernel = torch.zeros((b, s_q__1, h_q__128, dv__512), device="cuda", dtype=torch.bfloat16)
+    mla_kittens(grid, block, (q, qpe, kv, kvpe, out_kernel), shared_mem=160000)
+    torch.cuda.synchronize()
     print("out") 
-    print("out", out)
+    print("out", out_kernel)
+
+    # Reference comparison for debugging
+    DEBUG_REF = True
+    INCLUDE_PE_REF = False  # kernel currently does not use qpe/kvpe in scores
+    USE_ONLINE_REF = False  # set True to use online reference
+    HEAD_GROUP = 0
+    BLOCK_H = 64
+    BLOCK_N = 64
+
+    if DEBUG_REF:
+        q_ref = q[:, 0] if q.dim() == 4 else q
+        kv_ref = kv[0] if kv.dim() == 4 else kv
+        qpe_ref = qpe[:, 0] if INCLUDE_PE_REF and qpe is not None and qpe.dim() == 4 else None
+        kvpe_ref = kvpe[0] if INCLUDE_PE_REF and kvpe is not None and kvpe.dim() == 4 else None
+
+        if USE_ONLINE_REF:
+            ref_out, _ = flashmla_ref_online(
+                q_ref,
+                kv_ref,
+                qpe=qpe_ref,
+                kvpe=kvpe_ref,
+                block_n=BLOCK_N,
+                block_h=BLOCK_H,
+                head_group=HEAD_GROUP,
+                include_pe=INCLUDE_PE_REF,
+                use_exp2=True,
+                return_debug=False,
+            )
+        out_view = out_kernel[:, 0] if out_kernel.dim() == 4 else out_kernel
+        out_slice = out_view[:, HEAD_GROUP * BLOCK_H:(HEAD_GROUP + 1) * BLOCK_H, :].float()
+        if False:
+            diff = (out_slice - ref_out).abs()
+            print(f"[ref] out_slice shape: {tuple(out_slice.shape)}")
+            print(f"[ref] max abs diff: {diff.max().item():.6f}")
+            print(f"[ref] mean abs diff: {diff.mean().item():.6f}")
+    return out_kernel
     
 choose = 1
 if choose == 0:
     ret = test_kittens_gemm_kernel()
 elif choose == 1:
-    out = torch.zeros_like(out)
-    run_kittens_mla()
+    out = run_kittens_mla()

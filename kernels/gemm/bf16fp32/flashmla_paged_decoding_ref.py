@@ -108,7 +108,7 @@ def flashmla_ref_online(
     """
     _validate_shapes(q, kv, qpe, kvpe, include_pe)
     q_sel = _slice_q_heads(q, block_h, head_group)
-    Q_shared = q_sel
+    shared_Q = q_sel
     kvf = kv
 
     if include_pe and qpe is not None and kvpe is not None:
@@ -119,44 +119,44 @@ def flashmla_ref_online(
         qpe_f = None
         kvpe_f = None
 
-    bsz, h_q, _ = Q_shared.shape
+    bsz, h_q, _ = shared_Q.shape
     seq_len = kvf.shape[1]
-    max_vec = torch.full((bsz, h_q), -float("inf"), device=Q_shared.device, dtype=torch.float32)
-    l = torch.zeros((bsz, h_q), device=Q_shared.device, dtype=torch.float32)
-    acc = torch.zeros((bsz, h_q, kvf.shape[2]), device=Q_shared.device, dtype=torch.float32)
+    max_vec = torch.full((bsz, h_q), -float("inf"), device=shared_Q.device, dtype=torch.float32)
+    l = torch.zeros((bsz, h_q), device=shared_Q.device, dtype=torch.float32)
+    acc = torch.zeros((bsz, h_q, kvf.shape[2]), device=shared_Q.device, dtype=torch.float32)
 
     debug: Optional[List[Dict[str, torch.Tensor]]] = [] if return_debug else None
 
     for start in range(0, seq_len, block_n):
         end = min(start + block_n, seq_len)
-        kv_block = kvf[:, start:end]
-        scores = torch.matmul(Q_shared, kv_block.transpose(-1, -2)).float()
+        shared_KV = kvf[:, start:end]
+        acc_s = torch.matmul(shared_Q, shared_KV.transpose(-1, -2)).float()
         if qpe_f is not None and kvpe_f is not None:
-            scores = scores + torch.matmul(qpe_f, kvpe_f[:, start:end].transpose(-1, -2))
+            acc_s = acc_s + torch.matmul(qpe_f, kvpe_f[:, start:end].transpose(-1, -2))
         if scale is not None:
-            scores = scores * scale
+            acc_s = acc_s * scale
 
-        block_max = scores.max(dim=-1).values
-        m_new = torch.maximum(max_vec, block_max)
-        scale_prev = _exp(max_vec - m_new, use_exp2)
-        scores_shifted = scores - m_new.unsqueeze(-1)
-        p = _exp(scores_shifted, use_exp2)
+        block_max = acc_s.max(dim=-1).values
+        max_vec_new = torch.maximum(max_vec, block_max)
+        scale_prev = _exp(max_vec - max_vec_new, use_exp2)
+        acc_s_trans = acc_s - max_vec_new.unsqueeze(-1)
+        acc_s_trans = _exp(acc_s_trans, use_exp2)
 
-        l_new = l * scale_prev + p.sum(dim=-1)
-        acc = acc * scale_prev.unsqueeze(-1) + torch.matmul(p.bfloat16(), kv_block)
+        l_new = l * scale_prev + acc_s_trans.sum(dim=-1)
+        acc = acc * scale_prev.unsqueeze(-1) + torch.matmul(p.bfloat16(), shared_KV)
 
         if return_debug and debug is not None:
             debug.append(
                 {
-                    "start": torch.tensor(start, device=Q_shared.device),
+                    "start": torch.tensor(start, device=shared_Q.device),
                     "block_max": block_max,
-                    "m_new": m_new,
+                    "m_new": max_vec_new,
                     "scale_prev": scale_prev,
                     "block_sum": p.sum(dim=-1),
                 }
             )
 
-        max_vec = m_new
+        max_vec = max_vec_new
         l = l_new
 
     out = acc / l.clamp_min(1e-20).unsqueeze(-1)
