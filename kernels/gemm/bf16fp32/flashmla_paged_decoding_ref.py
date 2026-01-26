@@ -146,7 +146,7 @@ def flashmla_ref_online(
 
 
         l = l * scale_prev + acc_s_trans.sum(dim=-1)
-        acc_o = acc_o * scale_prev.unsqueeze(-1) + torch.matmul(p.bfloat16(), shared_KV)
+        acc_o = acc_o * scale_prev.unsqueeze(-1) + torch.matmul(acc_s_trans.bfloat16(), shared_KV)
 
         if return_debug and debug is not None:
             debug.append(
@@ -155,7 +155,7 @@ def flashmla_ref_online(
                     "block_max": block_max,
                     "m_new": max_vec_new,
                     "scale_prev": scale_prev,
-                    "block_sum": p.sum(dim=-1),
+                    "block_sum": acc_s_trans.sum(dim=-1),
                 }
             )
 

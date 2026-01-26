@@ -110,6 +110,8 @@ __device__ bool thread0() {
 #define BARRIER { \
     asm volatile("s_waitcnt vmcnt(0)"); \
     asm volatile("s_waitcnt lgkmcnt(0)"); \
+    __builtin_amdgcn_s_barrier(); \
+    __builtin_amdgcn_sched_barrier(0); \
     __syncthreads(); \
 }
  #define D(x) do { if(thread0())printf("%d,  " #x ": %lf\n",  __LINE__, static_cast<float>(x)); } while (0)
@@ -224,7 +226,7 @@ void flashmla_paged_decoding(
     G::load(shared_Q, Q, {0, batch_idx, head_group, 0});
     BARRIER;
     // for k in seq_len // BN
-    int num_kv_blocks = (SEQ_LEN + BLOCK_N__64 - 1) / BLOCK_N__64;
+    constexpr int num_kv_blocks = (SEQ_LEN + BLOCK_N__64 - 1) / BLOCK_N__64;
     rt_bf<16, 32, row_l, rt_16x32_s> A_tile;
     rt_bf<32, 32, row_l, rt_16x32_s> B_tile;
     rt_bf<64, 64, row_l, rt_16x32_s> A2_tile;
@@ -249,7 +251,8 @@ void flashmla_paged_decoding(
     
 
     // for (int k = 0; k < num_kv_blocks - 2; k++){
-    // for (int k = 0; k < num_kv_blocks - 60; k++){
+    // for (int k = 0; k < num_kv_blocks; k++){
+    // for (int k = 0; k < num_kv_blocks; k++){
     for (int k = 0; k < 2; k++){
         //  KV_shared = T.copy(blocked_kv)::: [64, 576]
         // if(thread0())printf("batch_idx:%d, pos: %d, kv_ptr %p DV: %d\n", batch_idx, k * BLOCK_N, kv_ptr, DV);
@@ -267,6 +270,11 @@ void flashmla_paged_decoding(
                 shared_Q_sum += float(shared_Q.data[i]);
             }
             Dk(shared_Q_sum);
+            
+
+            float shared_Q_repeat = 0;
+
+            Dk(shared_Q.data[0]);
             float shared_K_sum = 0;
             for(int i = 0; i < 32768; i++){
                 shared_K_sum += float(shared_KV.data[i]);
@@ -286,17 +294,21 @@ void flashmla_paged_decoding(
             load(B_tile, subtile_inplace<32, 32>(shared_KV, {warp_col__0_1, step}));
             BARRIER;
             mma_ABt(acc_s, A_tile, B_tile, acc_s);
-            
+            BARRIER;
         }
-        #ifdef hip_rtc2
-        if(k == 2){
-            D(acc_s.tiles[0][0].data[0].x);
-            D(acc_s.tiles[0][0].data[0].y);
-            D(acc_s.tiles[0][0].data[1].x);
-            D(acc_s.tiles[0][0].data[1].y);
-            D(float(A_tile.tiles[0][0].data[0].x));
-            D(float(shared_Q.data[0]));
-        }
+        BARRIER;
+        Dk(sum_tile(A_tile));
+        Dk(sum_tile(B_tile));
+        Dk(sum_tile(acc_s));
+        #ifdef hip_rtc
+        // if(k == 2){
+            Dk(acc_s.tiles[0][0].data[0].x);
+            Dk(acc_s.tiles[0][0].data[0].y);
+            Dk(acc_s.tiles[0][0].data[1].x);
+            Dk(acc_s.tiles[0][0].data[1].y);
+            Dk(float(A_tile.tiles[0][0].data[0].x));
+            Dk(float(shared_Q.data[0]));
+        // }
         #endif
         
         // acc_s layout: [16,32] col
@@ -377,8 +389,7 @@ void flashmla_paged_decoding(
         // 9 acc_o *= scores_vec
         if(lane_id / 8 == 0) shared_scale.data[warp_id * 8 + lane_id / 8] = scale_vec.data[0][0];
         __syncthreads();
-        
-        
+        Dk2(sum_tile(acc_s_trans));
         for(int i = 0; i < 4; i++){
             o_scale_vec.data[i][0].x = shared_scale.data[i * 16 + lane_id % 4 * 4];
             o_scale_vec.data[i][0].y = shared_scale.data[i * 16 + lane_id % 4 * 4 + 1];
@@ -405,9 +416,7 @@ void flashmla_paged_decoding(
 
         mul_row(acc_o, acc_o, o_scale_vec);
 
-        if(k < 1000){
-            Dk2(acc_o.tiles[0][0].data[0].x);
-        }
+        Dk2(acc_o.tiles[0][0].data[0].x);
 
         if(thread0()){
             float shared_s_sum = 0;
@@ -444,24 +453,36 @@ void flashmla_paged_decoding(
             Dk2(sum_val_A);
             Dk2(sum_val_B);
             mma_ABt(acc_o, A2_tile, B2_tile, acc_o);
-            Dk2(sum_row(log_sum));
+            // Dk2(sum_row(log_sum));
         }
-        if(k < 1000){
-            Dk2(acc_o.tiles[0][0].data[0].x);
-        }
+        Dk(acc_o.tiles[0][0].data[0].x);
+        Dk(acc_o.tiles[0][0].data[0].y);
+        Dk(acc_o.tiles[0][0].data[1].x);
+        Dk(acc_o.tiles[0][0].data[1].y);
 
     }
+    BARRIER;
+    
+    if(threadIdx.x % 8 == 0){
+        shared_scale.data[threadIdx.x / 8] = log_sum.data[0][0];
+    }
+    BARRIER;
     
 
     D(sum_tile(acc_o));
-    D(sum_row(log_sum));
-    div_row(acc_o, acc_o, log_sum);
+    // D(sum_row(log_sum));
     D(sum_tile(acc_o));
     rt_fl<64, 64, row_l, rt_16x16_s> o_reg_transposed; // 2row, 4col. 
+    decltype(o_reg_transposed)::col_vec log_sum_row;
+    for(int i = 0; i < 4; i++){
+        log_sum_row.data[i][0] = shared_scale.data[lane_id / 4 + i * 16];
+    }
     transpose(o_reg_transposed, acc_o);
     D(sum_tile(o_reg_transposed));
+    div_row(o_reg_transposed, o_reg_transposed, log_sum_row);
     if(thread0()){
-        printf("output1: %lf\n", acc_o.tiles[0][0].data[0].x);
+        printf("output1: %lf\n", o_reg_transposed.tiles[0][0].data[0].x);
+        printf("output1: %lf\n", o_reg_transposed.tiles[0][0].data[0].y);
     }
     
     // TODO(zty):::::: 

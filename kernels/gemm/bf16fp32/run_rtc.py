@@ -268,13 +268,12 @@ def run_kittens_mla():
     out_kernel = torch.zeros((b, s_q__1, h_q__128, dv__512), device="cuda", dtype=torch.bfloat16)
     mla_kittens(grid, block, (q, qpe, kv, kvpe, out_kernel), shared_mem=160000)
     torch.cuda.synchronize()
-    print("out") 
-    print("out", out_kernel)
+    print("hipkittens_flashmla_out", out_kernel)
 
     # Reference comparison for debugging
     DEBUG_REF = True
     INCLUDE_PE_REF = False  # kernel currently does not use qpe/kvpe in scores
-    USE_ONLINE_REF = False  # set True to use online reference
+    USE_ONLINE_REF = True  # set True to use online reference
     HEAD_GROUP = 0
     BLOCK_H = 64
     BLOCK_N = 64
@@ -298,9 +297,10 @@ def run_kittens_mla():
                 use_exp2=True,
                 return_debug=False,
             )
+            print("ref_online_out", ref_out)
         out_view = out_kernel[:, 0] if out_kernel.dim() == 4 else out_kernel
         out_slice = out_view[:, HEAD_GROUP * BLOCK_H:(HEAD_GROUP + 1) * BLOCK_H, :].float()
-        if False:
+        if True:
             diff = (out_slice - ref_out).abs()
             print(f"[ref] out_slice shape: {tuple(out_slice.shape)}")
             print(f"[ref] max abs diff: {diff.max().item():.6f}")
