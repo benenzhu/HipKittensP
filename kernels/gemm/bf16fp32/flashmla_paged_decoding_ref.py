@@ -128,7 +128,7 @@ def flashmla_ref_online(
     debug: Optional[List[Dict[str, torch.Tensor]]] = [] if return_debug else None
 
     # for start in range(0, seq_len, block_n):
-    for start in range(0, block_n * 2, block_n):
+    for start in range(0, block_n, block_n):
         end = min(start + block_n, seq_len)
         shared_KV = kvf[:, start:end]
         acc_s = torch.matmul(shared_Q, shared_KV.transpose(-1, -2)).float()
@@ -137,6 +137,10 @@ def flashmla_ref_online(
             acc_s = acc_s + torch.matmul(qpe_f, kvpe_f[:, start:end].transpose(-1, -2))
         if scale is not None:
             acc_s = acc_s * scale
+        
+        print("shared_Q", shared_Q.shape)
+        print("shared_KV", shared_KV.shape)
+        print("acc_s", acc_s) # 对的...
 
         block_max = acc_s.max(dim=-1).values
         max_vec_new = torch.maximum(max_vec, block_max)
@@ -147,8 +151,21 @@ def flashmla_ref_online(
         acc_s_trans = _exp(acc_s_trans, use_exp2)
 
 
+        print("acc_s_trans", acc_s_trans)
         l = l * scale_prev + acc_s_trans.sum(dim=-1)
         print("l", l)
+        print(acc_s_trans.shape, shared_KV.shape, "KKKK")
+        
+        # [1, 64, 64]
+        global aa, bb
+        aa = acc_s_trans.bfloat16()[:, 0, :]
+        print("shared_KV", shared_KV)
+        bb = shared_KV.bfloat16()[:, :, 0]
+        for i in bb.flatten().tolist():
+            print("now", i)
+        # print("aa", aa)
+        print("bb", bb)
+        print("flatten", aa.flatten()@(bb.flatten()))
         acc_o = acc_o * scale_prev.unsqueeze(-1) + torch.matmul(acc_s_trans.bfloat16(), shared_KV)
         print("acc_o", acc_o)
 

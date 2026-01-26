@@ -22,7 +22,7 @@ importlib.reload(flashmla_paged_decoding_ref)
 # importlib.reload(tritonblas.matmul)
 from rtc import _compile_kernel, get_triton_gemm_NTN, my_assert_close, log, get_kernel
 from flashmla_paged_decoding_ref import flashmla_ref_full, flashmla_ref_online
-torch.set_printoptions(threshold=1000, edgeitems=3, sci_mode=False)     
+torch.set_printoptions(threshold=1000, edgeitems=3, sci_mode=False, precision=6)     
 
 
 

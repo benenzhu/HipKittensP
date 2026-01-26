@@ -68,6 +68,7 @@ struct st_16x16_swizzled {
     __device__ __forceinline__ static const uint32_t swizzle (int2 coord) {
         const int r = coord.x, c = coord.y;
         using T = _T;
+        static_assert(false, "Unsupported type");
 
         const uint32_t offset = sizeof(T)*(r*cols + c);
 
