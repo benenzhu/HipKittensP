@@ -260,9 +260,10 @@ def run_kittens_mla():
     grid = (1, 1, 1)
     block = (512, 1, 1)
     SEQ_LEN = 4096
-    q = torch.randn(b, s_q__1, h_q__128, dv__512).cuda().bfloat16().contiguous() * 0.0 + 1
+    torch.random.manual_seed(0)
+    q = torch.randn(b, s_q__1, h_q__128, dv__512).cuda().bfloat16().contiguous() * 0.0 + 0.1
     qpe = torch.randn(b, s_q__1, h_q__128, dpe__64).cuda().bfloat16().contiguous()
-    kv = torch.randn(1, b, SEQ_LEN, dv__512).cuda().bfloat16().contiguous() * 0.0 + 1
+    kv = torch.randn(1, b, SEQ_LEN, dv__512).cuda().bfloat16().contiguous() * 0.0 + 0.1
     kvpe = torch.randn(1, b, SEQ_LEN, dpe__64).cuda().bfloat16().contiguous()
     out_kernel = torch.zeros((b, s_q__1, h_q__128, dv__512), device="cuda", dtype=torch.bfloat16)
     mla_kittens(grid, block, (q, qpe, kv, kvpe, out_kernel), shared_mem=160000)

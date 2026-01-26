@@ -80,7 +80,7 @@ __device__ inline static void load(RT &dst, const ST &src) {
                                 if constexpr (RT::base_tile_stride == 8) {
                                     asm volatile(
                                         "ds_read_b128 %0, %1 offset:%2\n"
-                                        // "s_waitcnt lgkmcnt(0)\n"
+                                        "s_waitcnt lgkmcnt(0)\n"
                                         : "=v"(*reinterpret_cast<float4*>(&dst.tiles[register_row][register_col].data[idx]))
                                         : "v"(addr), "i"(offset)
                                         : "memory"
@@ -89,7 +89,7 @@ __device__ inline static void load(RT &dst, const ST &src) {
                                 } else if constexpr (RT::base_tile_stride == 4) {
                                     asm volatile(
                                         "ds_read_b64 %0, %1 offset:%2\n"
-                                        // "s_waitcnt lgkmcnt(0)\n"
+                                        "s_waitcnt lgkmcnt(0)\n"
                                         : "=v"(*reinterpret_cast<float2*>(&dst.tiles[register_row][register_col].data[idx]))
                                         : "v"(addr), "i"(offset)
                                         : "memory"
@@ -386,7 +386,7 @@ __device__ inline static void load(RT &dst, const ST &src) {
                                 if constexpr (RT::base_tile_stride == 8) {
                                     asm volatile(
                                         "ds_read_b128 %0, %1 offset:%2\n"
-                                        // "s_waitcnt lgkmcnt(0)\n"
+                                        "s_waitcnt lgkmcnt(0)\n"
                                         : "=v"(*reinterpret_cast<float4*>(&dst.tiles[register_row][register_col].data[idx]))
                                         : "v"(addr), "i"(offset)
                                         : "memory"
@@ -395,7 +395,7 @@ __device__ inline static void load(RT &dst, const ST &src) {
                                 } else if constexpr (RT::base_tile_stride == 4) {
                                     asm volatile(
                                         "ds_read_b64 %0, %1 offset:%2\n"
-                                        // "s_waitcnt lgkmcnt(0)\n"
+                                        "s_waitcnt lgkmcnt(0)\n"
                                         : "=v"(*reinterpret_cast<float2*>(&dst.tiles[register_row][register_col].data[idx]))
                                         : "v"(addr), "i"(offset)
                                         : "memory"
@@ -405,8 +405,10 @@ __device__ inline static void load(RT &dst, const ST &src) {
                                 }
                             } else if constexpr (std::is_same_v<U2, fp8e4m3_4>) {
                                 if constexpr (RT::base_tile_stride == 16) {
+                                    static_assert(false);
                                     asm volatile(
                                         "ds_read_b128 %0, %1 offset:%2\n"
+                                        "s_waitcnt lgkmcnt(0)\n"
                                         : "=v"(*reinterpret_cast<float4*>(&dst.tiles[register_row][register_col].data[idx]))
                                         : "v"(addr), "i"(offset)
                                         : "memory"
@@ -558,7 +560,7 @@ __device__ inline static void load(RT &dst, const ST &src) {
                                     asm volatile(
                                         "ds_read_b64_tr_b16 %0, %2 offset:%3\n"
                                         "ds_read_b64_tr_b16 %1, %2 offset:%4\n"
-                                        // "s_waitcnt lgkmcnt(0)\n"
+                                        "s_waitcnt lgkmcnt(0)\n"
                                         : "=v"(*reinterpret_cast<float2*>(&dst.tiles[register_row][register_col].data[idx])), 
                                         "=v"(*reinterpret_cast<float2*>(&dst.tiles[register_row][register_col].data[idx + 2]))
                                         : "v"(addr), "i"(offset), "i"(offset + 4 * ST::underlying_subtile_row_bytes)
@@ -569,7 +571,7 @@ __device__ inline static void load(RT &dst, const ST &src) {
                                     asm volatile(
                                         "ds_read_b64_tr_b16 %0, %2 offset:%4\n"
                                         "ds_read_b64_tr_b16 %1, %3 offset:%4\n"
-                                        // "s_waitcnt lgkmcnt(0)\n"
+                                        "s_waitcnt lgkmcnt(0)\n"
                                         : "=v"(*reinterpret_cast<float2*>(&dst.tiles[register_row][register_col].data[idx])), 
                                         "=v"(*reinterpret_cast<float2*>(&dst.tiles[register_row][register_col].data[idx + 2]))
                                         : "v"(addr), "v"(next_addr), "i"(offset)
@@ -579,7 +581,7 @@ __device__ inline static void load(RT &dst, const ST &src) {
                                 } else if constexpr (RT::base_tile_stride == 4) {
                                     asm volatile(
                                         "ds_read_b64_tr_b16 %0, %1 offset:%2\n"
-                                        // "s_waitcnt lgkmcnt(0)\n"
+                                        "s_waitcnt lgkmcnt(0)\n"
                                         : "=v"(*reinterpret_cast<float2*>(&dst.tiles[register_row][register_col].data[idx]))
                                         : "v"(addr), "i"(offset)
                                         : "memory"
