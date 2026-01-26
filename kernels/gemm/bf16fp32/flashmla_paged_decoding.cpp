@@ -206,7 +206,7 @@ void flashmla_paged_decoding(
     ___& shared_scale = al.allocate<___>();
     
 
-    constexpr auto total_shared_sizes__147456 = sizeof(shared_Q) + sizeof(S_shared) + sizeof(shared_KV) + sizeof(shared_s);
+    constexpr auto total_shared_sizes__147456 = sizeof(shared_Q) + sizeof(S_shared) + sizeof(shared_KV) + sizeof(shared_s) + sizeof(shared_scale);
                                 
     static_assert(total_shared_sizes__147456 <= 160000, "Shared memory size exceeds 160KB");
     
@@ -231,7 +231,7 @@ void flashmla_paged_decoding(
     rt_bf<64, 64, row_l, rt_16x32_s> B2_tile;
     rt_fl<64, 64, col_l, rt_16x16_s> acc_o; // 2row, 4col.
     typename decltype(acc_s_trans)::row_vec max_vec, max_vec_prev, scores_sum, log_sum, scale_vec;
-    typename decltype(acc_o)::col_vec o_scale_vec, o_scores_sum;
+    typename decltype(acc_o)::col_vec o_scale_vec;
     zero(acc_s);
     ones(scale_vec);
     constexpr auto now___ = sizeof(max_vec);
@@ -243,7 +243,6 @@ void flashmla_paged_decoding(
     neg_infty(max_vec);
     zero(acc_o);
     zero(log_sum);
-    zero(o_scores_sum);
     
     
     
@@ -348,10 +347,6 @@ void flashmla_paged_decoding(
         // 2.2 max_vec = T.row_max(acc_s)
         // 3. max_vec = max(max_vec, max_vec_prev)
         col_max(max_vec, acc_s_trans, max_vec_prev);
-        if(k == 0){
-            Dk2(acc_s_trans.tiles[0][0].data[0].x);
-            Dk2(max_vec.data[0][0]);
-        }
         
         // 计算缩放因子，作用于归一化分母(sum), 输出(O) acc_s直接减去最大值，然后exp2, 乘上v加起来就行.
         // 4. scale_vec = max_vec_prev - max_vec
@@ -449,7 +444,7 @@ void flashmla_paged_decoding(
             Dk2(sum_val_A);
             Dk2(sum_val_B);
             mma_ABt(acc_o, A2_tile, B2_tile, acc_o);
-            Dk2(sum_row(o_scores_sum));
+            Dk2(sum_row(log_sum));
         }
         if(k < 1000){
             Dk2(acc_o.tiles[0][0].data[0].x);
@@ -459,8 +454,8 @@ void flashmla_paged_decoding(
     
 
     D(sum_tile(acc_o));
-    D(sum_row(o_scores_sum));
-    div_row(acc_o, acc_o, o_scores_sum);
+    D(sum_row(log_sum));
+    div_row(acc_o, acc_o, log_sum);
     D(sum_tile(acc_o));
     rt_fl<64, 64, row_l, rt_16x16_s> o_reg_transposed; // 2row, 4col. 
     transpose(o_reg_transposed, acc_o);

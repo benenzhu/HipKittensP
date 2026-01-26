@@ -123,7 +123,7 @@ def flashmla_ref_online(
     seq_len = kvf.shape[1]
     max_vec = torch.full((bsz, h_q), -float("inf"), device=shared_Q.device, dtype=torch.float32)
     l = torch.zeros((bsz, h_q), device=shared_Q.device, dtype=torch.float32)
-    acc = torch.zeros((bsz, h_q, kvf.shape[2]), device=shared_Q.device, dtype=torch.float32)
+    acc_o = torch.zeros((bsz, h_q, kvf.shape[2]), device=shared_Q.device, dtype=torch.float32)
 
     debug: Optional[List[Dict[str, torch.Tensor]]] = [] if return_debug else None
 
@@ -138,12 +138,15 @@ def flashmla_ref_online(
 
         block_max = acc_s.max(dim=-1).values
         max_vec_new = torch.maximum(max_vec, block_max)
+
         scale_prev = _exp(max_vec - max_vec_new, use_exp2)
+
         acc_s_trans = acc_s - max_vec_new.unsqueeze(-1)
         acc_s_trans = _exp(acc_s_trans, use_exp2)
 
-        l_new = l * scale_prev + acc_s_trans.sum(dim=-1)
-        acc = acc * scale_prev.unsqueeze(-1) + torch.matmul(p.bfloat16(), shared_KV)
+
+        l = l * scale_prev + acc_s_trans.sum(dim=-1)
+        acc_o = acc_o * scale_prev.unsqueeze(-1) + torch.matmul(p.bfloat16(), shared_KV)
 
         if return_debug and debug is not None:
             debug.append(
@@ -157,9 +160,8 @@ def flashmla_ref_online(
             )
 
         max_vec = max_vec_new
-        l = l_new
 
-    out = acc / l.clamp_min(1e-20).unsqueeze(-1)
+    out = acc_o / l.clamp_min(1e-20).unsqueeze(-1)
     return out, debug
 
 
