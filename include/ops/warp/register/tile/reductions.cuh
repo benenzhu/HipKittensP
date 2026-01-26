@@ -83,6 +83,85 @@ __device__ static inline void row_reduce(V &row_accum, const T &src, const V &sr
     }
 }
 
+
+namespace zz3 {
+using T =rt_fl<8, 64, row_l, rt_8x64_s>;
+using V =T::col_vec;
+using op = base_ops::sum;
+constexpr auto reset = true;   
+__device__ bool thread0() {
+    return threadIdx.x == 0 && blockIdx.x == 0 && blockIdx.y == 0;
+}
+#define D(x) do { if(thread0())printf("%d,  " #x ": %lf\n",  __LINE__, static_cast<float>(x)); } while (0)
+
+// template <typename op>
+__device__ static inline void row_reduce_sum(V &row_accum, const T &src, const V &src_accum) {
+    // I actually like these static asserts because they give more verbose errors when things go wrong.
+    static_assert(std::is_same_v<typename V::layout, typename rt_base<typename T::T, typename T::layout, typename T::shape>::col_vec_layout>); // compatible layout
+    static_assert(std::is_same_v<typename V::T2, typename T::dtype>); // compatible type
+    static_assert(V::outer_dim == T::height); // compatible size
+
+    using dtype = T::dtype;
+    using RT = V::dtype;
+    using RT2 = base_types::packing<RT>::packed_type;
+
+    static_assert(!std::is_same_v<RT, fp8e4m3>, "Unsupported type for reduction");
+
+    const int leader = laneid() % T::base_tile_rows;
+    D(rt_8x64_s::elements_per_thread);
+    D(src.base_tile_reductions);
+    // D(row_accum.)
+    const int max_shift__4 = T::base_tile_threads_per_reduction / 2;
+    const int max_shift__3 = 3;
+
+    #pragma unroll
+    for(int i = 0; i < src.height; i++) {
+        dtype accum_packed = src.tiles[i][0].data[0];
+        for (int k = 1; k < src.packed_per_base_tile; k++) {
+            accum_packed = op::template op<dtype>(accum_packed, src.tiles[i][0].data[k]);
+        }
+
+        #pragma unroll
+        for(int j = 1; j < src.width; j++) {
+            #pragma unroll
+            for (int k = 0; k < src.packed_per_base_tile; k++) {
+                accum_packed = op::template op<dtype>(accum_packed, src.tiles[i][j].data[k]);
+            }
+        }
+        RT accum_single = op::template op<RT>(accum_packed.x, accum_packed.y);
+        D(accum_single);
+
+        /* if constexpr (std::is_same_v<RT, bf16> && T::base_tile_rows == 32) {
+            uint2_t res = __builtin_amdgcn_permlane32_swap(__bfloat16_as_ushort(accum_single), __bfloat16_as_ushort(accum_single), false, true);
+            accum_single = op::template op<RT>(__ushort_as_bfloat16(res.x), __ushort_as_bfloat16(res.y));
+        }
+        else if constexpr (std::is_same_v<RT, half> && T::base_tile_rows == 32) {
+            uint2_t res = __builtin_amdgcn_permlane32_swap(__half_as_ushort(accum_single), __half_as_ushort(accum_single), false, true);
+            accum_single = op::template op<RT>(__ushort_as_half(res.x), __ushort_as_half(res.y));
+        } else if constexpr (std::is_same_v<RT, float> && T::base_tile_rows == 32) {
+            uint2_t res = __builtin_amdgcn_permlane32_swap(__float_as_uint(accum_single), __float_as_uint(accum_single), false, true);
+            accum_single = op::template op<RT>(__uint_as_float(res.x), __uint_as_float(res.y));
+        } else */ 
+        {
+            for (int shift = max_shift__4; shift > 0; shift/=2) {
+                accum_single = op::template op<RT>(accum_single, __shfl_down(accum_single, shift * T::base_tile_rows));
+                D(accum_single);
+            }
+
+            accum_single = __shfl(accum_single, leader);
+            D(accum_single);
+        }
+
+        if(reset) {
+            row_accum[i][0] = accum_single;
+        }
+        else {
+            row_accum[i][0] = op::template op<RT>(src_accum[i][0], accum_single);
+        }
+    }
+}
+}
+
 /**
  * @brief Perform a row-wise reduction on a matrix in column-major layout.
  *

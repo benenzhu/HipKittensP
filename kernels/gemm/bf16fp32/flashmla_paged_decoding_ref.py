@@ -127,10 +127,12 @@ def flashmla_ref_online(
 
     debug: Optional[List[Dict[str, torch.Tensor]]] = [] if return_debug else None
 
-    for start in range(0, seq_len, block_n):
+    # for start in range(0, seq_len, block_n):
+    for start in range(0, block_n * 2, block_n):
         end = min(start + block_n, seq_len)
         shared_KV = kvf[:, start:end]
         acc_s = torch.matmul(shared_Q, shared_KV.transpose(-1, -2)).float()
+        # print("acc_s", acc_s)
         if qpe_f is not None and kvpe_f is not None:
             acc_s = acc_s + torch.matmul(qpe_f, kvpe_f[:, start:end].transpose(-1, -2))
         if scale is not None:
@@ -146,7 +148,9 @@ def flashmla_ref_online(
 
 
         l = l * scale_prev + acc_s_trans.sum(dim=-1)
+        print("l", l)
         acc_o = acc_o * scale_prev.unsqueeze(-1) + torch.matmul(acc_s_trans.bfloat16(), shared_KV)
+        print("acc_o", acc_o)
 
         if return_debug and debug is not None:
             debug.append(
@@ -161,6 +165,7 @@ def flashmla_ref_online(
 
         max_vec = max_vec_new
 
+    print("l", l)
     out = acc_o / l.clamp_min(1e-20).unsqueeze(-1)
     return out, debug
 

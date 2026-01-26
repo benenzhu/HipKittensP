@@ -116,7 +116,7 @@ __device__ bool thread0() {
 }
  #define D(x) do { if(thread0())printf("%d,  " #x ": %lf\n",  __LINE__, static_cast<float>(x)); } while (0)
  #define Dk(x) do { if(thread0())printf("%d, K:%d " #x ": %lf\n",  __LINE__, k, static_cast<float>(x)); } while (0)
-//  #define D(x) 
+//  #define D(x)
 //  #define Dk(x) 
  #define Dk2(x) do { if(thread0())printf("%d, K:%d " #x ": %lf\n",  __LINE__, k, static_cast<float>(x)); } while (0)
  
@@ -216,7 +216,7 @@ void flashmla_paged_decoding(
 
     // 64 * 64 / 8 = 32 * 16
     rt_fl<16, 32, col_l, rt_16x16_s> acc_s;
-    rt_fl<8, 64, col_l, rt_8x64_s> acc_s_trans;
+    rt_fl<8, 64, row_l, rt_8x64_s> acc_s_trans;
     
     //  8 * 32
     
@@ -232,7 +232,7 @@ void flashmla_paged_decoding(
     rt_bf<64, 64, row_l, rt_16x32_s> A2_tile;
     rt_bf<64, 64, row_l, rt_16x32_s> B2_tile;
     rt_fl<64, 64, col_l, rt_16x16_s> acc_o; // 2row, 4col.
-    typename decltype(acc_s_trans)::row_vec max_vec, max_vec_prev, scores_sum, log_sum, scale_vec;
+    typename decltype(acc_s_trans)::col_vec max_vec, max_vec_prev, scores_sum, log_sum, scale_vec;
     typename decltype(acc_o)::col_vec o_scale_vec;
     zero(acc_s);
     ones(scale_vec);
@@ -358,7 +358,7 @@ void flashmla_paged_decoding(
         copy(max_vec_prev, max_vec);
         // 2.2 max_vec = T.row_max(acc_s)
         // 3. max_vec = max(max_vec, max_vec_prev)
-        col_max(max_vec, acc_s_trans, max_vec_prev);
+        row_max(max_vec, acc_s_trans, max_vec_prev);
         
         // 计算缩放因子，作用于归一化分母(sum), 输出(O) acc_s直接减去最大值，然后exp2, 乘上v加起来就行.
         // 4. scale_vec = max_vec_prev - max_vec
@@ -368,7 +368,7 @@ void flashmla_paged_decoding(
 
         // 6. acc_s -= max_vec 
         // TODO(zty)::::
-        sub_col(acc_s_trans, acc_s_trans, max_vec);
+        sub_row(acc_s_trans, acc_s_trans, max_vec);
         
         // 7. acc_s = T.exp2(acc_s)
         exp2(acc_s_trans, acc_s_trans);
@@ -379,15 +379,21 @@ void flashmla_paged_decoding(
         
         // 8.1 scores_sum = T.row_sum(acc_s)
         // TODO:
-        col_sum(scores_sum, acc_s_trans, scores_sum);
+        D(acc_s_trans.tiles[0][0].data[0].x); // 8 * 64;
+        zz3::row_reduce_sum(scores_sum, acc_s_trans, scores_sum);
+        D(scores_sum.data[0][0]);
 
         // 8.2 logsum *=scale_vec 
         mul(log_sum, log_sum, scale_vec);
+        Dk(log_sum.data[0][0]);
         // 8.3 logsum += scores_sum
         add(log_sum, log_sum, scores_sum);
-
+        Dk(log_sum.data[0][0]);
         // 9 acc_o *= scores_vec
-        if(lane_id / 8 == 0) shared_scale.data[warp_id * 8 + lane_id / 8] = scale_vec.data[0][0];
+        if(lane_id / 8 == 0) {
+            shared_scale.data[warp_id * 8 + lane_id % 8] = scale_vec.data[0][lane_id % 8];
+        }
+        BARRIER;
         __syncthreads();
         Dk2(sum_tile(acc_s_trans));
         for(int i = 0; i < 4; i++){
@@ -396,6 +402,7 @@ void flashmla_paged_decoding(
             o_scale_vec.data[i][1].x = shared_scale.data[i * 16 + lane_id % 4 * 4 + 2];
             o_scale_vec.data[i][1].y = shared_scale.data[i * 16 + lane_id % 4 * 4 + 3];
         }
+        BARRIER;
 
         auto r2s_trans = [&]() {
             for(int i = 0; i < 4; i++){
@@ -416,7 +423,16 @@ void flashmla_paged_decoding(
 
         mul_row(acc_o, acc_o, o_scale_vec);
 
-        Dk2(acc_o.tiles[0][0].data[0].x);
+        // acc_o.tiles  // (64,64 | 16,16 | col)
+        // o_scale_vec.data  // (4, 4)
+        Dk(acc_o.tiles[0][0].data[0].x);
+        Dk(acc_o.tiles[0][0].data[0].y);
+        Dk(acc_o.tiles[0][0].data[1].x);
+        Dk(acc_o.tiles[0][0].data[1].y);
+        Dk(o_scale_vec.data[0][0].x);
+        Dk(o_scale_vec.data[0][0].y);
+        Dk(o_scale_vec.data[0][1].x);
+        Dk(o_scale_vec.data[0][1].y);
 
         if(thread0()){
             float shared_s_sum = 0;
@@ -463,8 +479,8 @@ void flashmla_paged_decoding(
     }
     BARRIER;
     
-    if(threadIdx.x % 8 == 0){
-        shared_scale.data[threadIdx.x / 8] = log_sum.data[0][0];
+    if(lane_id / 8 == 0){
+        shared_scale.data[warp_id * 8 + lane_id % 8] = log_sum.data[0][0];
     }
     BARRIER;
     
@@ -479,6 +495,8 @@ void flashmla_paged_decoding(
     }
     transpose(o_reg_transposed, acc_o);
     D(sum_tile(o_reg_transposed));
+    D(log_sum_row.data[0][0]);
+    D(log_sum_row.data[1][0]);
     div_row(o_reg_transposed, o_reg_transposed, log_sum_row);
     if(thread0()){
         printf("output1: %lf\n", o_reg_transposed.tiles[0][0].data[0].x);
@@ -486,7 +504,7 @@ void flashmla_paged_decoding(
     }
     
     // TODO(zty):::::: 
-    zhuzhustore::store(output, o_reg_transposed, {0, batch_idx, head_group, 0});
+    zhuzhustore::store(output, o_reg_transposed, {0, batch_idx, head_group, warp_id});
 }
 
 // Host-side launcher (for non-RTC usage)

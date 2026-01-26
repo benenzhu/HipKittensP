@@ -218,7 +218,7 @@ if True:
     # DeepSeek-V2/V3 MLA 参数
     b = 1           # batch size
     s_q__1 = 1         # decode 阶段 query 长度为 1
-    h_q__128 = 128       # query heads
+    h_q__128___tmp64 = 64       # query heads
     h_kv = 1        # kv heads (MLA absorb 后)
     d__576 = 576         # query/key dim = dv + dpe
     dv__512 = 512        # value dim (kv_lora_rank)
@@ -237,12 +237,12 @@ if True:
     max_seqlen_pad = math.ceil(max_seqlen / block_size) * block_size
     num_blocks_per_batch = max_seqlen_pad // block_size
     
-    q = torch.randn(b, s_q__1, h_q__128, d__576, dtype=dtype, device=device)
+    q = torch.randn(b, s_q__1, h_q__128___tmp64, d__576, dtype=dtype, device=device)
     block_table = torch.randperm(b * num_blocks_per_batch, dtype=torch.int32, device=device).view(b, num_blocks_per_batch)
     blocked_kv = torch.randn(block_table.numel(), block_size, h_kv, d__576, dtype=dtype, device=device)
     
     # 运行参考实现
-    out = ref_mla_decode(q, blocked_kv, block_table, cache_seqlens, h_q__128, h_kv, d__576, dv__512, causal=True)
+    out = ref_mla_decode(q, blocked_kv, block_table, cache_seqlens, h_q__128___tmp64, h_kv, d__576, dv__512, causal=True)
     
     print(f"Input Q shape: {q.shape}")
     print(f"Input blocked_kv shape: {blocked_kv.shape}")
@@ -261,11 +261,11 @@ def run_kittens_mla():
     block = (512, 1, 1)
     SEQ_LEN = 4096
     torch.random.manual_seed(0)
-    q = torch.randn(b, s_q__1, h_q__128, dv__512).cuda().bfloat16().contiguous() * 0.0 + 0.1
-    qpe = torch.randn(b, s_q__1, h_q__128, dpe__64).cuda().bfloat16().contiguous()
-    kv = torch.randn(1, b, SEQ_LEN, dv__512).cuda().bfloat16().contiguous() * 0.0 + 0.1
+    q = torch.randn(b, s_q__1, h_q__128___tmp64, dv__512).cuda().bfloat16().contiguous() * 0.0 + 0.1
+    qpe = torch.randn(b, s_q__1, h_q__128___tmp64, dpe__64).cuda().bfloat16().contiguous()
+    kv = torch.randn(1, b, SEQ_LEN, dv__512).cuda().bfloat16().contiguous()  # * 0.0 + 0.1
     kvpe = torch.randn(1, b, SEQ_LEN, dpe__64).cuda().bfloat16().contiguous()
-    out_kernel = torch.zeros((b, s_q__1, h_q__128, dv__512), device="cuda", dtype=torch.bfloat16)
+    out_kernel = torch.zeros((b, s_q__1, h_q__128___tmp64, dv__512), device="cuda", dtype=torch.bfloat16)
     mla_kittens(grid, block, (q, qpe, kv, kvpe, out_kernel), shared_mem=160000)
     torch.cuda.synchronize()
     print("hipkittens_flashmla_out", out_kernel)
