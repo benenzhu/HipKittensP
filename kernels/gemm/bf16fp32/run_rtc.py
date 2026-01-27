@@ -5,6 +5,7 @@ import os
 os.environ["PYTORCH_NO_HIP_MEMORY_CACHING"]="1"
 os.environ["HSA_DISABLE_FRAGMENT_ALLOCATOR"]="1"
 os.system("clear")
+from typing import Dict, List, Optional, Tuple
 import torch
 from dataclasses import dataclass
 import torch
@@ -23,8 +24,52 @@ importlib.reload(flashmla_paged_decoding_ref)
 # importlib.reload(tritonblas.matmul)
 from rtc import _compile_kernel, get_triton_gemm_NTN, my_assert_close, log, get_kernel
 from flashmla_paged_decoding_ref import flashmla_ref_full, flashmla_ref_online
-torch.set_printoptions(threshold=1000, edgeitems=3, sci_mode=False, precision=6)     
+torch.set_printoptions(threshold=1000, edgeitems=32, sci_mode=False, precision=6, linewidth=900)     
 
+def _exp(x: torch.Tensor, use_exp2: bool) -> torch.Tensor:
+    if use_exp2:
+        if hasattr(torch, "exp2"):
+            return torch.exp2(x)
+        return torch.pow(2.0, x)
+    return torch.exp(x)
+
+
+def _validate_shapes(
+    q: torch.Tensor,
+    kv: torch.Tensor,
+    qpe: Optional[torch.Tensor],
+    kvpe: Optional[torch.Tensor],
+    include_pe: bool,
+) -> None:
+    if q.dim() != 3:
+        raise ValueError(f"q must be [B, H_Q, D], got {q.shape}")
+    if kv.dim() != 3:
+        raise ValueError(f"kv must be [B, S, D], got {kv.shape}")
+    if q.shape[0] != kv.shape[0]:
+        raise ValueError("q and kv must have the same batch size")
+    if include_pe:
+        if (qpe is None) != (kvpe is None):
+            raise ValueError("qpe and kvpe must be both set when include_pe is True")
+        if qpe is not None:
+            if qpe.dim() != 3 or qpe.shape[:2] != q.shape[:2]:
+                raise ValueError(f"qpe must be [B, H_Q, DPE], got {qpe.shape}")
+        if kvpe is not None:
+            if kvpe.dim() != 3 or kvpe.shape[:2] != kv.shape[:2]:
+                raise ValueError(f"kvpe must be [B, S, DPE], got {kvpe.shape}")
+
+
+def _slice_q_heads(
+    q: torch.Tensor,
+    block_h: int,
+    head_group: Optional[int],
+) -> torch.Tensor:
+    if head_group is None:
+        return q
+    head_start = head_group * block_h
+    head_end = head_start + block_h
+    if head_end > q.shape[1]:
+        raise ValueError("head_group * block_h exceeds H_Q")
+    return q[:, head_start:head_end]
 
 
 # Configure shared memory - kernel needs 160KB for double-buffered tiles
@@ -255,20 +300,135 @@ if True:
     print(f"Output dtype: {out.dtype}")
     print("Reference MLA decode completed successfully!")
 
+def flashmla_ref_online(
+    q: torch.Tensor,
+    kv: torch.Tensor,
+    qpe: Optional[torch.Tensor] = None,
+    kvpe: Optional[torch.Tensor] = None,
+    block_n: int = 64,
+    block_h: int = 64,
+    head_group: Optional[int] = None,
+    scale: Optional[float] = None,
+    use_exp2: bool = True,
+    return_debug: bool = False,
+    include_pe: bool = True,
+) -> Tuple[torch.Tensor, Optional[List[Dict[str, torch.Tensor]]]]:
+    """
+    Blocked online softmax reference. Mirrors the kernel's structure:
+    - maintains max (m) and sum (l) per row
+    - accumulates unnormalized output and divides by l at the end
+    """
+    _validate_shapes(q, kv, qpe, kvpe, include_pe)
+    q_sel = _slice_q_heads(q, block_h, head_group)
+    shared_Q = q_sel
+    kvf = kv
 
-def run_kittens_mla(): 
+    if include_pe and qpe is not None and kvpe is not None:
+        qpe_sel = _slice_q_heads(qpe, block_h, head_group)
+        qpe_f = qpe_sel
+        kvpe_f = kvpe
+    else:
+        qpe_f = None
+        kvpe_f = None
+
+    bsz, h_q, _ = shared_Q.shape
+    seq_len = kvf.shape[1]
+    max_vec = torch.full((bsz, h_q), -float("inf"), device=shared_Q.device, dtype=torch.float32)
+    l = torch.zeros((bsz, h_q), device=shared_Q.device, dtype=torch.float32)
+    global acc_o
+    acc_o = torch.zeros((bsz, h_q, kvf.shape[2]), device=shared_Q.device, dtype=torch.float32)
+
+    debug: Optional[List[Dict[str, torch.Tensor]]] = [] if return_debug else None
+
+    # for start in range(0, seq_len, block_n):
+    for start in range(0, block_n, block_n):
+        end = min(start + block_n, seq_len)
+        shared_KV = kvf[:, start:end]
+        acc_s = torch.matmul(shared_Q, shared_KV.transpose(-1, -2)).float()
+        print(shared_Q.shape, shared_KV.shape)  
+
+        # (Q @ KT) @ KT
+        # print("acc_s", acc_s)
+        if qpe_f is not None and kvpe_f is not None:
+            acc_s = acc_s + torch.matmul(qpe_f, kvpe_f[:, start:end].transpose(-1, -2))
+        if scale is not None:
+            acc_s = acc_s * scale
+        
+        # print("shared_Q", shared_Q.shape)
+        # print("shared_KV", shared_KV.shape)
+        # print("acc_s", acc_s) # 对的...
+
+        block_max = acc_s.max(dim=-1).values
+        max_vec_new = torch.maximum(max_vec, block_max)
+
+        scale_prev = _exp(max_vec - max_vec_new, use_exp2)
+
+        acc_s_trans = acc_s - max_vec_new.unsqueeze(-1)
+        acc_s_trans = _exp(acc_s_trans, use_exp2)
+
+
+        # print("acc_s_trans\n", acc_s_trans)
+        l = l * scale_prev + acc_s_trans.sum(dim=-1)
+        # print("l", l)
+        print(acc_s_trans.shape, shared_KV.shape, "KKKK")
+        
+        # [1, 64, 64]
+        global aa, bb
+        aa = acc_s_trans.bfloat16()[:, 0, :]
+        # print("shared_KV.shape", shared_KV.shape)
+        bb = shared_KV.bfloat16()[:, :, 0]
+        # for i in bb.flatten().tolist():
+        #     print("now", i)
+        # print("aa", aa)
+        # print("bb", bb)
+        # print("flatten", aa.flatten()@(bb.flatten()))
+        # print("acc_o_pre", )
+        print("acc_s_trans_bf16", acc_s_trans.bfloat16())
+        # print("shared_KV", shared_KV.bfloat16()[])
+        print("shared_KV\n", shared_KV[:,:,:64])
+        global KV_shared
+        global acc_debug
+        KV_shared = shared_KV[:, :, :64].clone()
+        acc_debug = acc_s_trans.bfloat16().clone()
+        acc_o = acc_o * scale_prev.unsqueeze(-1) + torch.matmul(acc_s_trans.bfloat16(), shared_KV)
+        print("acc_o", acc_o)
+
+        if return_debug and debug is not None:
+            debug.append(
+                {
+                    "start": torch.tensor(start, device=shared_Q.device),
+                    "block_max": block_max,
+                    "m_new": max_vec_new,
+                    "scale_prev": scale_prev,
+                    "block_sum": acc_s_trans.sum(dim=-1),
+                }
+            )
+
+        max_vec = max_vec_new
+    print("l", l)
+    out = acc_o / l.clamp_min(1e-20).unsqueeze(-1)
+    return out, debug
+# def run_kittens_mla(): 
+choose = 1
+if choose == 0:
+    ret = test_kittens_gemm_kernel()
+elif choose == 1:
     mla_kittens = get_kernel("flashmla_paged_decoding", "flashmla_paged_decoding.cpp")  
     grid = (1, 1, 1)
     block = (512, 1, 1)
     SEQ_LEN = 4096
     torch.random.manual_seed(0)
     q = torch.randn(b, s_q__1, h_q__128___tmp64, dv__512).cuda().bfloat16().contiguous() * 0.0 + 0.1
+    # q = torch.arange(b * s_q__1 * h_q__128___tmp64 * dv__512).cuda().bfloat16().contiguous().reshape(q.shape) * 0.0001 + 0.2
     qpe = torch.randn(b, s_q__1, h_q__128___tmp64, dpe__64).cuda().bfloat16().contiguous()
     kv = torch.randn(1, b, SEQ_LEN, dv__512).cuda().bfloat16().contiguous()  # * 0.0 + 0.1
-    # kv = (torch.arange(b * 4096 * dv__512).cuda().bfloat16().contiguous() * 0.0001).reshape(kv1.shape)
+    # kv = (torch.arange(b * 4096 * dv__512).cuda().bfloat16().contiguous() * 0.0001).reshape(kv.shape)
     kvpe = torch.randn(1, b, SEQ_LEN, dpe__64).cuda().bfloat16().contiguous()
+    tile_debug = torch.zeros(64, 64).cuda().bfloat16().contiguous()
+    tile_debug2 = torch.zeros(64, 64).cuda().bfloat16().contiguous()
+    tile_debug3 = torch.zeros(64, 64).cuda().bfloat16().contiguous()
     out_kernel = torch.zeros((b, s_q__1, h_q__128___tmp64, dv__512), device="cuda", dtype=torch.bfloat16)
-    mla_kittens(grid, block, (q, qpe, kv, kvpe, out_kernel), shared_mem=160000)
+    mla_kittens(grid, block, (q, qpe, kv, kvpe, out_kernel, tile_debug, tile_debug2, tile_debug3), shared_mem=160000)
     torch.cuda.synchronize()
     print("hipkittens_flashmla_out", out_kernel)
 
@@ -299,7 +459,7 @@ def run_kittens_mla():
                 use_exp2=True,
                 return_debug=False,
             )
-            print("ref_online_out", ref_out)
+            # print("ref_online_out", ref_out)
         out_view = out_kernel[:, 0] if out_kernel.dim() == 4 else out_kernel
         out_slice = out_view[:, HEAD_GROUP * BLOCK_H:(HEAD_GROUP + 1) * BLOCK_H, :].float()
         if True:
@@ -307,10 +467,5 @@ def run_kittens_mla():
             print(f"[ref] out_slice shape: {tuple(out_slice.shape)}")
             print(f"[ref] max abs diff: {diff.max().item():.6f}")
             print(f"[ref] mean abs diff: {diff.mean().item():.6f}")
-    return out_kernel
+    # return out_kernel
     
-choose = 1
-if choose == 0:
-    ret = test_kittens_gemm_kernel()
-elif choose == 1:
-    out = run_kittens_mla()

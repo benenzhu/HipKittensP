@@ -144,6 +144,15 @@ __device__ void print_mem(const __hip_bfloat16 *ptr){
 }
 
 
+#define PT(xx) \
+    if(thread0()) \
+        for(int i = 0; i < xx.height; i++) \
+            for(int j = 0; j < xx.width; j++) \
+                for(int k = 0; k < xx.packed_per_base_tile; k++) {\
+                    printf("%d, " #xx ".[%d][%d].data[%d] %lf\n",  __LINE__,i,j,k, float(xx.tiles[i][j].data[k].x)); \
+                    printf("%d, " #xx ".[%d][%d].data[%d] %lf\n",  __LINE__,i,j,k, float(xx.tiles[i][j].data[k].y)); \
+                }\
+
 
 
 template<typename D>
@@ -188,7 +197,10 @@ void flashmla_paged_decoding(
     bf16* __restrict__ qpe_ptr, 
     bf16* __restrict__ kv_ptr,
     bf16* __restrict__ kvpe_ptr,
-    bf16* __restrict__ output_ptr         // [batch, h_q, dv]
+    bf16* __restrict__ output_ptr,         // [batch, h_q, dv]
+    bf16* __restrict__ tile_debug,         // [batch, h_q, dv]
+    bf16* __restrict__ tile_debug2,         // [batch, h_q, dv]
+    bf16* __restrict__ tile_debug3         // [batch, h_q, dv]
     // int* __restrict__ block_table,     // [batch, max_num_blocks]
     // bf16* __restrict__ blocked_kv,             // [total_tokens, h_kv, dv]
     // int* __restrict__ cache_seqlens,   // [batch]
@@ -265,7 +277,7 @@ void flashmla_paged_decoding(
     constexpr int num_kv_blocks = (SEQ_LEN + BLOCK_N__64 - 1) / BLOCK_N__64;
     rt_bf<16, 32, row_l, rt_16x32_s> A_tile;
     rt_bf<32, 32, row_l, rt_16x32_s> B_tile;
-    rt_bf<64, 64, row_l, rt_16x32_s> A2_tile;
+    rt_bf<64, 64, col_l, rt_32x16_s> A2_tile;
     rt_bf<64, 64, col_l, rt_32x16_s> B2_tile;
     rt_fl<64, 64, col_l, rt_16x16_s> acc_o; // 2row, 4col.
     typename decltype(acc_s_trans)::col_vec max_vec, max_vec_prev, scores_sum, log_sum, scale_vec;
@@ -446,7 +458,7 @@ void flashmla_paged_decoding(
         }
         BARRIER;
 
-        auto translate_addr =[](int col, int row){
+        auto translate_addr =[](int row, int col){
             return 16 * (row % 16) + col % 16
                     + (row / 16) * 64 * 16
                     + (col / 16) * 16 * 16;
@@ -502,7 +514,7 @@ void flashmla_paged_decoding(
         {
             
             shared_s.swizzle({0,0});
-            zz3::load(A2_tile, shared_s);
+            load(A2_tile, shared_s);
             zz4::load(B2_tile, subtile_inplace<64,64>(shared_KV, {0, kittens::warpid()}));
             // load(B2_tile, shared_KV);
             // Dk(A2_tile.tiles[0][0].data[0].y);
@@ -526,25 +538,119 @@ void flashmla_paged_decoding(
             // }
             Dk2(sum_val_A);
             Dk2(sum_val_B);
-            print_mem<16, 16, 16>(shared_s.data);
+            // print_mem<16, 16, 16>(shared_s.data);
             // print_mem<16, 16, 512>(shared_KV.data);
-            mma_AB(acc_o, A2_tile, B2_tile, acc_o);
-            A2_tile.tiles;
-            for(int k = 0; k < 2; k++){
-            for(int j = 0; j < 64; j+=16)
-            for(int i = 0; i < 4; i++){
-                Dkw(A2_tile.tiles[0][k].data[i].x, j);
-                Dkw(A2_tile.tiles[0][k].data[i].y, j);
-            }    
+            auto print_tile = [](rt_bf<64, 64, row_l, rt_16x32_s> A2_tile){
+                for(int row = 0; row < 64; row++){
+                    for(int col = 0; col < 64; col++){
+                        auto tile_row = row / 16;
+                        auto tile_col = col / 32;
+                        auto row_in = (row) % 16;
+                        auto col_in = col % 32;
+                        auto which_t = (row_in * 32 + col_in) / 8;
+                        auto which_d = (row_in * 32 + row_in) % 8;
+                        if(which_t == threadIdx.x){
+                            auto &d = A2_tile.tiles[tile_row][tile_col].data[which_d / 2];
+                            auto val = which_d % 2 == 0? d.x: d.y;
+                            printf("%d %d %d %d:", tile_row, tile_col, which_t, which_d);
+                            printf("%lf, ", float(val));
+                        }
+                        __syncthreads();
+                    }
+                    if(threadIdx.x == 0){
+                        printf("\n");
+                    }
                 }
-            for(int k = 0; k < 2; k++){
-            for(int j = 0; j < 64; j+=16)
-            for(int i = 0; i < 4; i++){
-                Dkw(B2_tile.tiles[k][0].data[i].x, j);
-                Dkw(B2_tile.tiles[k][0].data[i].y, j);
-            }    
-            }
-            // Dk2(sum_row(log_sum));
+                if(threadIdx.x == 0){
+                    printf("\n\n");
+
+                }
+                __syncthreads();
+            };
+            auto print_tile2 = [&](rt_bf<64, 64, col_l, rt_32x16_s> A2_tile, bf16* out){
+                if(threadIdx.x == 0){
+                    printf("B2_tile\n");
+                }
+                for(int row = 0; row < 64; row++){
+                    if(threadIdx.x == 0){
+                        printf("         [ ");
+                    }
+                    for(int col = 0; col < 64; col++){
+                        constexpr int Inner_row = 32;
+                        constexpr int Inner_col = 16;
+                        auto tile_row = row / Inner_row;
+                        auto tile_col = col / Inner_col;
+                        auto row_in = row % Inner_row;
+                        auto col_in = col % Inner_col;
+                        auto which_t = row_in / 8 * Inner_col + col_in;
+                        auto which_d = row_in % 8;
+                        if(which_t == threadIdx.x){
+                            auto &d = A2_tile.tiles[tile_row][tile_col].data[which_d / 2];
+                            auto val = which_d % 2 == 0? d.x: d.y;
+                            // printf("%d %d %d %d:", tile_row, tile_col, which_t, which_d);
+                            // printf("%7.6lf, ", float(val));
+                            out[row * 64 + col] = val;
+                        }
+                        __syncthreads();
+                    }
+                    if(threadIdx.x == 0){
+                        printf("]\n");
+                    }
+                }
+                if(threadIdx.x == 0){
+                    printf("\n\n");
+
+                }
+                __syncthreads();
+            };
+            
+            BARRIER;
+            print_tile2(A2_tile, tile_debug);
+            print_tile2(B2_tile, tile_debug2);
+            // PT(A2_tile);
+            // PT(B2_tile);
+
+            mma_AtB(acc_o, A2_tile, B2_tile, acc_o);
+            BARRIER;
+            auto print_tile3 = [&](rt_fl<64, 64, col_l, rt_16x16_s> A2_tile, bf16* out){
+                if(threadIdx.x == 0){
+                    printf("B2_tile\n");
+                }
+                for(int row = 0; row < 64; row++){
+                    if(threadIdx.x == 0){
+                        printf("         [ ");
+                    }
+                    for(int col = 0; col < 64; col++){
+                        constexpr int Inner_row = 16;
+                        constexpr int Inner_col = 16;
+                        constexpr int stride = Inner_col * Inner_row / 64;
+                        auto tile_row = row / Inner_row;
+                        auto tile_col = col / Inner_col;
+                        auto row_in = row % Inner_row;
+                        auto col_in = col % Inner_col;
+                        auto which_t = row_in / stride * Inner_col + col_in;
+                        auto which_d = row_in % stride;
+                        if(which_t == threadIdx.x){
+                            auto &d = A2_tile.tiles[tile_row][tile_col].data[which_d / 2];
+                            auto val = which_d % 2 == 0? d.x: d.y;
+                            // printf("%d %d %d %d:", tile_row, tile_col, which_t, which_d);
+                            // printf("%7.6lf, ", float(val));
+                            out[row * 64 + col] = val;
+                        }
+                        __syncthreads();
+                    }
+                    if(threadIdx.x == 0){
+                        printf("]\n");
+                    }
+                }
+                if(threadIdx.x == 0){
+                    printf("\n\n");
+
+                }
+                __syncthreads();
+            };
+            print_tile3(acc_o, tile_debug3);
+            // PT(acc_o)
         }
         Dk(acc_o.tiles[0][0].data[0].x);
         Dk(acc_o.tiles[0][0].data[0].y);

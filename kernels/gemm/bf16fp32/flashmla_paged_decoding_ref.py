@@ -132,15 +132,18 @@ def flashmla_ref_online(
         end = min(start + block_n, seq_len)
         shared_KV = kvf[:, start:end]
         acc_s = torch.matmul(shared_Q, shared_KV.transpose(-1, -2)).float()
+        print(shared_Q.shape, shared_KV.shape)  
+
+        # (Q @ KT) @ KT
         # print("acc_s", acc_s)
         if qpe_f is not None and kvpe_f is not None:
             acc_s = acc_s + torch.matmul(qpe_f, kvpe_f[:, start:end].transpose(-1, -2))
         if scale is not None:
             acc_s = acc_s * scale
         
-        print("shared_Q", shared_Q.shape)
-        print("shared_KV", shared_KV.shape)
-        print("acc_s", acc_s) # 对的...
+        # print("shared_Q", shared_Q.shape)
+        # print("shared_KV", shared_KV.shape)
+        # print("acc_s", acc_s) # 对的...
 
         block_max = acc_s.max(dim=-1).values
         max_vec_new = torch.maximum(max_vec, block_max)
@@ -151,21 +154,25 @@ def flashmla_ref_online(
         acc_s_trans = _exp(acc_s_trans, use_exp2)
 
 
-        print("acc_s_trans", acc_s_trans)
+        # print("acc_s_trans\n", acc_s_trans)
         l = l * scale_prev + acc_s_trans.sum(dim=-1)
-        print("l", l)
+        # print("l", l)
         print(acc_s_trans.shape, shared_KV.shape, "KKKK")
         
         # [1, 64, 64]
         global aa, bb
         aa = acc_s_trans.bfloat16()[:, 0, :]
-        print("shared_KV", shared_KV)
+        # print("shared_KV.shape", shared_KV.shape)
         bb = shared_KV.bfloat16()[:, :, 0]
-        for i in bb.flatten().tolist():
-            print("now", i)
-        print("aa", aa)
-        print("bb", bb)
-        print("flatten", aa.flatten()@(bb.flatten()))
+        # for i in bb.flatten().tolist():
+        #     print("now", i)
+        # print("aa", aa)
+        # print("bb", bb)
+        # print("flatten", aa.flatten()@(bb.flatten()))
+        # print("acc_o_pre", )
+        print("acc_s_trans_bf16", acc_s_trans.bfloat16())
+        # print("shared_KV", shared_KV.bfloat16()[])
+        print("shared_KV\n", shared_KV[:,:,:64])
         acc_o = acc_o * scale_prev.unsqueeze(-1) + torch.matmul(acc_s_trans.bfloat16(), shared_KV)
         print("acc_o", acc_o)
 
