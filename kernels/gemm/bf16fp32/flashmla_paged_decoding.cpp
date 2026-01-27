@@ -446,7 +446,7 @@ void flashmla_paged_decoding(
         }
         BARRIER;
 
-        auto translate_addr =[](int row, int col){
+        auto translate_addr =[](int col, int row){
             return 16 * (row % 16) + col % 16
                     + (row / 16) * 64 * 16
                     + (col / 16) * 16 * 16;
@@ -503,9 +503,10 @@ void flashmla_paged_decoding(
             
             shared_s.swizzle({0,0});
             zz3::load(A2_tile, shared_s);
-            load(B2_tile, subtile_inplace<64,64>(shared_KV, {0, kittens::warpid()}));
+            zz4::load(B2_tile, subtile_inplace<64,64>(shared_KV, {0, kittens::warpid()}));
+            // load(B2_tile, shared_KV);
             // Dk(A2_tile.tiles[0][0].data[0].y);
-            Dkn(A2_tile.tiles[0][0].data[0].x, 64);
+            // Dkn(A2_tile.tiles[0][0].data[0].x, 64);
             Dk(A2_tile.tiles[0][0].data[0].y);
             Dk(A2_tile.tiles[0][0].data[1].x);
             Dk(A2_tile.tiles[0][0].data[1].y);
@@ -525,14 +526,22 @@ void flashmla_paged_decoding(
             // }
             Dk2(sum_val_A);
             Dk2(sum_val_B);
-            // print_mem<16, 16, 16>(shared_s.data);
+            print_mem<16, 16, 16>(shared_s.data);
             // print_mem<16, 16, 512>(shared_KV.data);
             mma_AB(acc_o, A2_tile, B2_tile, acc_o);
+            A2_tile.tiles;
             for(int k = 0; k < 2; k++){
             for(int j = 0; j < 64; j+=16)
             for(int i = 0; i < 4; i++){
-                Dkw(B2_tile.tiles[0][k].data[i].x, j);
-                Dkw(B2_tile.tiles[0][k].data[i].y, j);
+                Dkw(A2_tile.tiles[0][k].data[i].x, j);
+                Dkw(A2_tile.tiles[0][k].data[i].y, j);
+            }    
+                }
+            for(int k = 0; k < 2; k++){
+            for(int j = 0; j < 64; j+=16)
+            for(int i = 0; i < 4; i++){
+                Dkw(B2_tile.tiles[k][0].data[i].x, j);
+                Dkw(B2_tile.tiles[k][0].data[i].y, j);
             }    
             }
             // Dk2(sum_row(log_sum));

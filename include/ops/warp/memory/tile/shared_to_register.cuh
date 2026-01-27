@@ -854,6 +854,129 @@ __device__ inline static void load(RT &dst, const ST &src) {
     }
 }
 
+
+namespace zz4{
+
+// template<ducks::rt::col_layout RT, ducks::st::all ST>
+using RT = rt_bf<64, 64, col_l, rt_32x16_s>;
+using ST = st_subtile<st_bf<64, 512, st_16x16_s>, 64, 64>;
+__device__ inline static void load(RT &dst, const ST &src) {
+
+    static_assert(RT::rows == ST::rows, "register tile and shared tile must match rows");
+    static_assert(RT::cols == ST::cols,  "register tile and shared tile must match cols");
+
+    using T2 = RT::dtype;
+    using T  = base_types::packing<T2>::unpacked_type;
+    using U  = ST::dtype;
+    using U2 = base_types::packing<U >::packed_type;
+    constexpr int packing = base_types::packing<typename RT::dtype>::num();
+
+    const int laneid = kittens::laneid();
+
+    const int row_offset = ((laneid % 16) / 4) + ((laneid / dst.base_tile_cols) * dst.base_tile_stride);
+    const int col_offset = ((laneid % 4) * 4) + (16 * ((laneid % dst.base_tile_cols) / 16));
+
+    const uint32_t src_ptr = reinterpret_cast<uintptr_t>(&src.data[0]);
+    if constexpr (ST::underlying_subtile_rows <= RT::base_tile_rows && ST::underlying_subtile_cols <= RT::base_tile_cols) {
+        constexpr int shared_subtiles_per_register_subtile_row = RT::base_tile_cols / ST::underlying_subtile_cols;
+        constexpr int shared_subtiles_per_register_subtile_col = RT::base_tile_rows / ST::underlying_subtile_rows;
+
+        constexpr int stride_groups_per_shared_subtile_col = ST::underlying_subtile_rows / RT::base_tile_elements_per_stride_group;
+        {
+            const int col = (col_offset) % ST::underlying_subtile_cols;
+            const int shared_base_col = (col_offset) / ST::underlying_subtile_cols;
+            #pragma unroll
+            for (int k = 0; k < RT::base_tile_num_strides; k++) {
+                const int row = (row_offset + k * RT::base_tile_elements_per_stride_group) % ST::underlying_subtile_rows;
+                const int shared_base_row = (row_offset + k * RT::base_tile_elements_per_stride_group) / ST::underlying_subtile_rows;
+
+                const int shared_base_subtile_id = shared_base_row * ST::underlying_subtiles_per_row + shared_base_col;
+                const int shared_base_offset = shared_base_subtile_id * ST::underlying_subtile_bytes;
+
+                const uint32_t swizzled_offset = src.swizzle({row, col});
+                const uint32_t next_swizzled_offset = src.swizzle({row + 4, col});
+                const uint32_t addr = src_ptr + swizzled_offset + shared_base_offset;
+                const uint32_t next_addr = src_ptr + next_swizzled_offset + shared_base_offset;
+
+                int idx = k * RT::base_tile_stride / packing;
+
+                #pragma unroll
+                for (int i = 0; i < RT::height; i++) {
+                    const int shared_row = i * shared_subtiles_per_register_subtile_col;
+                    #pragma unroll
+                    for (int j = 0; j < RT::width; j++) {
+                        const int shared_col = j * shared_subtiles_per_register_subtile_row;
+                        const int shared_subtile_id = shared_row * ST::underlying_subtiles_per_row + shared_col;
+                        const int offset = shared_subtile_id * ST::underlying_subtile_bytes;
+
+                        if constexpr (std::is_same_v<U2, bf16_2>) {
+                            // Use two ds_read_b64_tr_b16 for stride == 8, dtype == bf16
+                            if constexpr (RT::base_tile_stride == 8) {
+                                asm volatile(
+                                    "ds_read_b64_tr_b16 %0, %2 offset:%4\n"
+                                    "ds_read_b64_tr_b16 %1, %3 offset:%4\n"
+                                    : "=v"(*reinterpret_cast<float2*>(&dst.tiles[i][j].data[idx])), 
+                                    "=v"(*reinterpret_cast<float2*>(&dst.tiles[i][j].data[idx + 2]))
+                                    : "v"(addr), "v"(next_addr), "i"(offset)
+                                    : "memory"
+                                );
+                            // Use one ds_read_b64_tr_b16 for stride == 4, dtype == bf16
+                            } 
+                        }
+                    }
+                }
+            }
+            
+
+            #pragma unroll
+            for (int k = 0; k < RT::base_tile_num_strides; k++) {
+                const int row = (row_offset + k * RT::base_tile_elements_per_stride_group) % ST::underlying_subtile_rows;
+                const int shared_base_row = (row_offset + k * RT::base_tile_elements_per_stride_group) / ST::underlying_subtile_rows;
+
+                const int shared_base_subtile_id = shared_base_row * ST::underlying_subtiles_per_row + shared_base_col;
+                const int shared_base_offset = shared_base_subtile_id * ST::underlying_subtile_bytes;
+
+                const uint32_t swizzled_offset = src.swizzle({row, col});
+                const uint32_t next_swizzled_offset = src.swizzle({row + 4, col});
+                const uint32_t addr = src_ptr + swizzled_offset + shared_base_offset;
+                const uint32_t next_addr = src_ptr + next_swizzled_offset + shared_base_offset;
+
+                int idx = k * RT::base_tile_stride / packing;
+
+                #pragma unroll
+                for (int i = 0; i < RT::height; i++) {
+                    const int shared_row = i * shared_subtiles_per_register_subtile_col;
+                    #pragma unroll
+                    for (int j = 0; j < RT::width; j++) {
+                        const int shared_col = j * shared_subtiles_per_register_subtile_row;
+                        const int shared_subtile_id = shared_row * ST::underlying_subtiles_per_row + shared_col;
+                        const int offset = shared_subtile_id * ST::underlying_subtile_bytes;
+
+                        if constexpr (std::is_same_v<U2, bf16_2>) {
+                            // Use two ds_read_b64_tr_b16 for stride == 8, dtype == bf16
+                            if constexpr (RT::base_tile_stride == 8) {
+                                // asm volatile(
+                                //     "ds_read_b64_tr_b16 %0, %2 offset:%4\n"
+                                //     "ds_read_b64_tr_b16 %1, %3 offset:%4\n"
+                                //     : "=v"(*reinterpret_cast<float2*>(&dst.tiles[i][j].data[idx])), 
+                                //     "=v"(*reinterpret_cast<float2*>(&dst.tiles[i][j].data[idx + 2]))
+                                //     : "v"(addr), "v"(next_addr), "i"(offset)
+                                //     : "memory"
+                                // );
+                                if(threadIdx.x == 0){
+                                    printf("addr: %d, next_addr: %d, offset: %d\n", addr - src_ptr, next_addr, offset);
+                                }
+                            // Use one ds_read_b64_tr_b16 for stride == 4, dtype == bf16
+                            } 
+                        }
+                    }
+                }
+            }
+        }
+    } 
+}
+}
+
 /**
  * @brief Store data into a shared tile from a register tile.
  *

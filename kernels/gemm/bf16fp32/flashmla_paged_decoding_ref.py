@@ -163,7 +163,7 @@ def flashmla_ref_online(
         bb = shared_KV.bfloat16()[:, :, 0]
         for i in bb.flatten().tolist():
             print("now", i)
-        # print("aa", aa)
+        print("aa", aa)
         print("bb", bb)
         print("flatten", aa.flatten()@(bb.flatten()))
         acc_o = acc_o * scale_prev.unsqueeze(-1) + torch.matmul(acc_s_trans.bfloat16(), shared_KV)

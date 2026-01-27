@@ -4,6 +4,7 @@ import os
 # os.environ["HSA_ENABLE_DEBUG"]="1o"
 os.environ["PYTORCH_NO_HIP_MEMORY_CACHING"]="1"
 os.environ["HSA_DISABLE_FRAGMENT_ALLOCATOR"]="1"
+os.system("clear")
 import torch
 from dataclasses import dataclass
 import torch
@@ -264,6 +265,7 @@ def run_kittens_mla():
     q = torch.randn(b, s_q__1, h_q__128___tmp64, dv__512).cuda().bfloat16().contiguous() * 0.0 + 0.1
     qpe = torch.randn(b, s_q__1, h_q__128___tmp64, dpe__64).cuda().bfloat16().contiguous()
     kv = torch.randn(1, b, SEQ_LEN, dv__512).cuda().bfloat16().contiguous()  # * 0.0 + 0.1
+    # kv = (torch.arange(b * 4096 * dv__512).cuda().bfloat16().contiguous() * 0.0001).reshape(kv1.shape)
     kvpe = torch.randn(1, b, SEQ_LEN, dpe__64).cuda().bfloat16().contiguous()
     out_kernel = torch.zeros((b, s_q__1, h_q__128___tmp64, dv__512), device="cuda", dtype=torch.bfloat16)
     mla_kittens(grid, block, (q, qpe, kv, kvpe, out_kernel), shared_mem=160000)
