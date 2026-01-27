@@ -437,14 +437,15 @@ class LightningAttention2(torch.autograd.Function):
         v = v.contiguous()
         s = s.contiguous()
 
-        b, h, n, d = q.shape
+        b, h, n__64, d__128 = q.shape
+        print(f"q.shape: {q.shape}")
         e = v.shape[-1]
-        o = torch.empty((b, h, n, e), dtype=q.dtype, device=q.device)
+        o = torch.empty((b, h, n__64, e), dtype=q.dtype, device=q.device)
 
         # debug dump
-        o_debug = torch.empty((b, h, n, e), dtype=q.dtype, device=q.device)
-        kv0_debug = torch.empty((b, h, d, e), dtype=torch.float32, device=q.device)
-        kv1_debug = torch.empty((b, h, d, e), dtype=torch.float32, device=q.device)
+        o_debug = torch.empty((b, h, n__64, e), dtype=q.dtype, device=q.device)
+        kv0_debug = torch.empty((b, h, d__128, e), dtype=torch.float32, device=q.device)
+        kv1_debug = torch.empty((b, h, d__128, e), dtype=torch.float32, device=q.device)
 
         BLOCK = 64
         NUM_BLOCK = triton.cdiv(q.shape[2], BLOCK)
@@ -464,8 +465,8 @@ class LightningAttention2(torch.autograd.Function):
             s,
             b,
             h,
-            n,
-            d,
+            n__64,
+            d__128,
             e,
             BLOCK=BLOCK,
             NUM_BLOCK=NUM_BLOCK,

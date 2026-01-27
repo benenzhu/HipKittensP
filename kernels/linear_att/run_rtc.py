@@ -4,6 +4,14 @@ from tqdm import trange
 import sys
 import numpy as np
 
+import baselines.lightning_attn2_dump
+import baselines.lightning_attn2_naive
+import importlib
+importlib.reload(baselines.lightning_attn2_dump)
+importlib.reload(baselines.lightning_attn2_naive)
+import os
+os.system("clear")
+
 # from baselines.lightning_attn2 import lightning_attn2
 from baselines.lightning_attn2_dump import lightning_attn2
 from baselines.lightning_attn2_naive import lightning_attn2_naive
@@ -82,7 +90,7 @@ def save_test_case(q, k, v, s, o, n, o_debug=None):
     filename = f'naive_qkv_randn_{n}.txt'
     print(f"slopes: {s}")
     import pdb
-    pdb.set_trace()
+    # pdb.set_trace()
     with open(filename, 'w') as f:    
         sf = s.to(torch.float32).flatten().cpu().numpy().tolist()
         qf = q.to(torch.float32).flatten().cpu().numpy().tolist()
@@ -117,59 +125,55 @@ def save_test_case(q, k, v, s, o, n, o_debug=None):
                 f.write(' ')
 
 
-def main():
-    torch.manual_seed(0)
-    # torch.manual_seed(42)
+torch.manual_seed(0)
+# torch.manual_seed(42)
+
+# B, H = 16, 8
+# sequence_lengths = [1024]
+
+B, H = 1, 1
+sequence_lengths = [64]
+# sequence_lengths = [128]
+# sequence_lengths = [1024]
+
+for N in sequence_lengths:
+    print(f"\nGenerating test case for sequence length {N}")
+    q, k, v, s = generate_inputs(B, H, N)
+
+    # pytorch_out = linear_attn(q, k, v, s)
+    # pytorch_out = linear_attn_naive_qkv(q, k, v)
+    pytorch_out = linear_attn_naive_qkv_lightning_version(q, k, v)
+    import pdb
+    # pdb.set_trace()
+    triton_out, triton_debug_out, kv0_debug, kv1_debug = lightning_attn2(q, k, v, s)
+    triton_out_naive, triton_debug_out_naive, kv0_naive, kv1_naive = lightning_attn2_naive(q, k, v, s)
+    print(f"kv0_naive: {kv0_naive}")
+    print(f"kv1_naive: {kv1_naive}")
+    print(f"kv0_debug: {kv0_debug}")
+    print(f"kv1_debug: {kv1_debug}")
+    np.save("kv0_naive.npy", kv0_naive.cpu().numpy())
+    np.save("kv1_naive.npy", kv1_naive.cpu().numpy())
+    # np.save("triton_out_naive_block32.npy", triton_out_naive.to(torch.float32).cpu().numpy())
+    # pdb.set_trace()
+    assert torch.allclose(triton_out, triton_out_naive, atol=1e-3, rtol=1e-3)
+    assert torch.allclose(triton_debug_out, triton_debug_out_naive, atol=1e-3, rtol=1e-3)
+    assert torch.allclose(kv0_debug, kv0_naive, atol=1e-5, rtol=1e-5)
+    # assert torch.allclose(kv1_debug, kv1_naive, atol=1e-5, rtol=1e-5)
     
-    # B, H = 16, 8
-    # sequence_lengths = [1024]
-
-    B, H = 1, 1
-    sequence_lengths = [64]
-    # sequence_lengths = [128]
-    # sequence_lengths = [1024]
+    avg_mag_pytorch = torch.mean(torch.abs(pytorch_out)).item()
+    # avg_mag_triton = torch.mean(torch.abs(triton_out)).item()
+    # max_diff = torch.max(torch.abs(pytorch_out - triton_out)).item()
+    # avg_diff = torch.mean(torch.abs(pytorch_out - triton_out)).item()
+    # assert torch.allclose(pytorch_out, triton_out, atol=1e-3, rtol=1e-3)
     
-    for N in sequence_lengths:
-        print(f"\nGenerating test case for sequence length {N}")
-        q, k, v, s = generate_inputs(B, H, N)
-
-        # pytorch_out = linear_attn(q, k, v, s)
-        # pytorch_out = linear_attn_naive_qkv(q, k, v)
-        pytorch_out = linear_attn_naive_qkv_lightning_version(q, k, v)
-        import pdb
-        pdb.set_trace()
-        triton_out, triton_debug_out, kv0_debug, kv1_debug = lightning_attn2(q, k, v, s)
-        triton_out_naive, triton_debug_out_naive, kv0_naive, kv1_naive = lightning_attn2_naive(q, k, v, s)
-        print(f"kv0_naive: {kv0_naive}")
-        print(f"kv1_naive: {kv1_naive}")
-        print(f"kv0_debug: {kv0_debug}")
-        print(f"kv1_debug: {kv1_debug}")
-        np.save("kv0_naive.npy", kv0_naive.cpu().numpy())
-        np.save("kv1_naive.npy", kv1_naive.cpu().numpy())
-        # np.save("triton_out_naive_block32.npy", triton_out_naive.to(torch.float32).cpu().numpy())
-        pdb.set_trace()
-        assert torch.allclose(triton_out, triton_out_naive, atol=1e-3, rtol=1e-3)
-        assert torch.allclose(triton_debug_out, triton_debug_out_naive, atol=1e-3, rtol=1e-3)
-        assert torch.allclose(kv0_debug, kv0_naive, atol=1e-5, rtol=1e-5)
-        assert torch.allclose(kv1_debug, kv1_naive, atol=1e-5, rtol=1e-5)
-        
-        avg_mag_pytorch = torch.mean(torch.abs(pytorch_out)).item()
-        # avg_mag_triton = torch.mean(torch.abs(triton_out)).item()
-        # max_diff = torch.max(torch.abs(pytorch_out - triton_out)).item()
-        # avg_diff = torch.mean(torch.abs(pytorch_out - triton_out)).item()
-        # assert torch.allclose(pytorch_out, triton_out, atol=1e-3, rtol=1e-3)
-        
-        print(f"PyTorch output magnitude: {avg_mag_pytorch}")
-        # print(f"Triton  output magnitude: {avg_mag_triton}")
-        # print(f"Max     difference between PyTorch and Triton: {max_diff}")
-        # print(f"Average difference between PyTorch and Triton: {avg_diff}")
-        
-        # save_test_case(q, k, v, s, triton_out, N)
-        # save_test_case(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), s, pytorch_out.transpose(1, 2), N) # for amd layout
-        # save_test_case(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), s, triton_out.transpose(1, 2), N) # for amd layout
-        # debug dump
-        # save_test_case(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), s, triton_out.transpose(1, 2), N, triton_debug_out.transpose(1, 2)) # for amd layout
-        print(f"Generated random test case for N={N}")
-
-if __name__ == "__main__":
-    main()
+    print(f"PyTorch output magnitude: {avg_mag_pytorch}")
+    # print(f"Triton  output magnitude: {avg_mag_triton}")
+    # print(f"Max     difference between PyTorch and Triton: {max_diff}")
+    # print(f"Average difference between PyTorch and Triton: {avg_diff}")
+    
+    # save_test_case(q, k, v, s, triton_out, N)
+    # save_test_case(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), s, pytorch_out.transpose(1, 2), N) # for amd layout
+    # save_test_case(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), s, triton_out.transpose(1, 2), N) # for amd layout
+    # debug dump
+    # save_test_case(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), s, triton_out.transpose(1, 2), N, triton_debug_out.transpose(1, 2)) # for amd layout
+    print(f"Generated random test case for N={N}")
