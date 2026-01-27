@@ -706,16 +706,17 @@ __device__ inline static void load(RT &dst, const ST &src) {
                                     );
                                 // Use one ds_read_b64_tr_b16 for stride == 4, dtype == bf16
                                 } else if constexpr (RT::base_tile_stride == 4) {
-                                    asm volatile(
-                                        "s_waitcnt vmcnt(0)\n"
-                                        "s_waitcnt lgkmcnt(0)\n"
-                                        "ds_read_b64_tr_b16 %0, %1 offset:%2\n"
-                                        "s_waitcnt lgkmcnt(0)\n"
-                                        "s_waitcnt vmcnt(0)\n"
-                                        : "=v"(*reinterpret_cast<float2*>(&dst.tiles[register_row][register_col].data[idx]))
-                                        : "v"(addr), "i"(offset)
-                                        : "memory"
-                                    );
+                                    if constexpr (std::is_same_v<U2, bf16_2>) {
+                                        using v4bf16_t = __bf16 __attribute__((ext_vector_type(4)));
+                                        auto* lds_ptr = reinterpret_cast<v4bf16_t __attribute__((address_space(3))) *>(addr + offset);
+                                        v4bf16_t result = __builtin_amdgcn_ds_read_tr16_b64_v4bf16(lds_ptr);
+                                        *reinterpret_cast<v4bf16_t*>(&dst.tiles[register_row][register_col].data[idx]) = result;
+                                    } else { // half_2
+                                        using v4f16_t = __fp16 __attribute__((ext_vector_type(4)));
+                                        auto* lds_ptr = reinterpret_cast<v4f16_t __attribute__((address_space(3))) *>(addr + offset);
+                                        v4f16_t result = __builtin_amdgcn_ds_read_tr16_b64_v4f16(lds_ptr);
+                                        *reinterpret_cast<v4f16_t*>(&dst.tiles[register_row][register_col].data[idx]) = result;
+                                    }
                                     
                                 } else {
                                     static_assert(false, "Unsupported stride");
@@ -1191,11 +1192,13 @@ __device__ inline static void store(ST &dst, const RT &src) {
                                 const int register_row = ii * register_subtiles_per_shared_subtile_col + i;
                                 const int register_col = jj * register_subtiles_per_shared_subtile_row + j;
 
-                                U* dst_elem_ptr = addr + offset;
-                                U* next_dst_elem_ptr = next_addr + offset;
+                                // Use LDS address space (3) to generate ds_write instead of flat_store
+                                using lds_ptr_t = U __attribute__((address_space(3))) *;
+                                auto* dst_elem_ptr = reinterpret_cast<lds_ptr_t>(reinterpret_cast<uintptr_t>(addr + offset));
+                                auto* next_dst_elem_ptr = reinterpret_cast<lds_ptr_t>(reinterpret_cast<uintptr_t>(next_addr + offset));
 
-                                dst_elem_ptr[0] = base_types::convertor<U, T>::convert(src.tiles[register_row][register_col].data[idx].x);
-                                next_dst_elem_ptr[0] = base_types::convertor<U, T>::convert(src.tiles[register_row][register_col].data[idx].y);
+                                *dst_elem_ptr = base_types::convertor<U, T>::convert(src.tiles[register_row][register_col].data[idx].x);
+                                *next_dst_elem_ptr = base_types::convertor<U, T>::convert(src.tiles[register_row][register_col].data[idx].y);
                             }
                         }
 
@@ -1240,11 +1243,13 @@ __device__ inline static void store(ST &dst, const RT &src) {
                         const int shared_subtile_id = shared_row * ST::underlying_subtiles_per_row + shared_col;
                         const int offset = (shared_subtile_id * ST::underlying_subtile_bytes) / sizeof(U);
 
-                        U* dst_elem_ptr = addr + offset;
-                        U* next_dst_elem_ptr = next_addr + offset;
+                        // Use LDS address space (3) to generate ds_write instead of flat_store
+                        using lds_ptr_t = U __attribute__((address_space(3))) *;
+                        auto* dst_elem_ptr = reinterpret_cast<lds_ptr_t>(reinterpret_cast<uintptr_t>(addr + offset));
+                        auto* next_dst_elem_ptr = reinterpret_cast<lds_ptr_t>(reinterpret_cast<uintptr_t>(next_addr + offset));
 
-                        dst_elem_ptr[0] = base_types::convertor<U, T>::convert(src.tiles[i][j].data[idx].x);
-                        next_dst_elem_ptr[0] = base_types::convertor<U, T>::convert(src.tiles[i][j].data[idx].y);
+                        *dst_elem_ptr = base_types::convertor<U, T>::convert(src.tiles[i][j].data[idx].x);
+                        *next_dst_elem_ptr = base_types::convertor<U, T>::convert(src.tiles[i][j].data[idx].y);
                     }
                 }
 

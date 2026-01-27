@@ -272,7 +272,7 @@ def run_kittens_mla(q, k, v, s, out):
     
     print("q.shape", q.shape, "k.shape", k.shape, "v.shape", v.shape, "s.shape", s.shape, "out.shape", out.shape)
     print("q.ptr", hex(q.data_ptr()), "k.ptr", hex(k.data_ptr()), "v.ptr", hex(v.data_ptr()), "out.ptr", hex(out.data_ptr()))
-    mla_kittens(grid, block, (q, k, v, s, out), shared_mem=160000)
+    mla_kittens(grid, block, (q, k, v, out), shared_mem=160000)
 
     return out
 for N in sequence_lengths:
