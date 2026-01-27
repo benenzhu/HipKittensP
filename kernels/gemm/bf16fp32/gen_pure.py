@@ -15,7 +15,7 @@ lines = new_lines
 new_lines = []
 start_with_Ldebug = False 
 for i in lines:
-    expect_list = [".Ldebug", ".Lloclists", "__hip_cuid", ".Lfunc_", ".Lrnglists_table", ".Lcu_begin", 
+    expect_list = [".Ldebug", ".Lloclists", "__hip_cuid", ".Lrnglists_table", ".Lcu_begin", 
     "	.section	.rodata",
                    ".Linfo",
                    ".Laddr",
@@ -39,7 +39,7 @@ for i in lines:
 lines = new_lines 
 
 print(len(lines))
-lines = [i for i in lines if not i.startswith(".Ltmp")]
+lines = [i for i in lines if not (i.startswith(".Ltmp") or i.startswith(".Lfunc"))]
 lines = [i for i in lines if len(i.strip())]
 
 # if False:

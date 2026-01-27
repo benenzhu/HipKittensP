@@ -65,12 +65,14 @@ __device__ static inline void wg_arange(auto &vec) {
     }
 }
 
-__global__ __launch_bounds__(NUM_THREADS, 2)
+__global__ __launch_bounds__(1, 2)
 void micro_tk(bf16* A, bf16* B, bf16* C) {
-    if(thread0()){
-        printf("zhuzhu\n");
-    }
-    
+    // if(thread0()){
+    // printf("zhuzhu2222\n");
+    // }
+    A[0]=1;
+    return;
+    #ifdef zhuzhu22
     if constexpr(true) { // test
         rt_fl<8, 64, row_l, rt_8x64_s> row_l;
         using row_vec = decltype(row_l)::row_vec;
@@ -449,4 +451,5 @@ void micro_tk(bf16* A, bf16* B, bf16* C) {
     store(g_c, C_accum[1][1], {0, 0, 
         (row * 2) * WARPS_M + WARPS_M + warp_row, 
         col * 2 * WARPS_N + WARPS_N + warp_col});
+    #endif
 }

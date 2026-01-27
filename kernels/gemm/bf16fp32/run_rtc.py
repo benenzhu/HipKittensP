@@ -87,7 +87,7 @@ def test_kittens_gemm_kernel():
     
     grid = (M // 256 * (N // 256), 1, 1)
     grid = (1,1,1)
-    block = (64, 1, 1)
+    block = (1, 1, 1)
     
     # Define kernel launch function
     def kittens_fn():
