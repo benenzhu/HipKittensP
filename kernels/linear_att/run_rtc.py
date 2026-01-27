@@ -168,7 +168,7 @@ def main():
         # save_test_case(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), s, pytorch_out.transpose(1, 2), N) # for amd layout
         # save_test_case(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), s, triton_out.transpose(1, 2), N) # for amd layout
         # debug dump
-        save_test_case(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), s, triton_out.transpose(1, 2), N, triton_debug_out.transpose(1, 2)) # for amd layout
+        # save_test_case(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), s, triton_out.transpose(1, 2), N, triton_debug_out.transpose(1, 2)) # for amd layout
         print(f"Generated random test case for N={N}")
 
 if __name__ == "__main__":
