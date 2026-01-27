@@ -86,49 +86,53 @@ def linear_attn_naive_qkv_lightning_version(q, k, v):
         o[:, :, start:end, :] = o_chunk
     return o
 
-def linear_attn_ref_online(q, k, v, s, block=CHUNK_SIZE, block_model=None, return_debug=False):
+def linear_attn_ref_online(q, k, v, s, block__64=CHUNK_SIZE, block_model__32=None, return_debug=False):
     """
     Torch reference for lightning_attn2 forward.
     Mirrors the Triton _fwd_kernel in baselines/lightning_attn2_dump.py.
     The e dimension is processed in block_model tiles to match kernel grid.
     """
-    b, h, n, d = q.shape
-    e = v.shape[-1]
-    if block_model is None:
-        block_model = min(1 << (e - 1).bit_length(), 32)
-    num_blocks = (n + block - 1) // block
+    b__1, h__1, n__64, d__128 = q.shape
+    print(n__64, d__128)
+    e__128 = v.shape[-1]
+    print(v.shape)
+    if block_model__32 is None:
+        block_model__32 = min(1 << (e__128 - 1).bit_length(), 32)
+    num_blocks__1 = (n__64 + block__64 - 1) // block__64
+    print(block_model__32)
+    print(block__64)
 
-    out = torch.empty((b, h, n, e), dtype=q.dtype, device=q.device)
+    out = torch.empty((b__1, h__1, n__64, e__128), dtype=q.dtype, device=q.device)
     out_debug = torch.empty_like(out) if return_debug else None
-    kv0_debug = torch.empty((b, h, d, e), dtype=torch.float32, device=q.device) if return_debug else None
-    kv1_debug = torch.empty((b, h, d, e), dtype=torch.float32, device=q.device) if return_debug else None
+    kv0_debug = torch.empty((b__1, h__1, d__128, e__128), dtype=torch.float32, device=q.device) if return_debug else None
+    kv1_debug = torch.empty((b__1, h__1, d__128, e__128), dtype=torch.float32, device=q.device) if return_debug else None
 
-    off = torch.arange(block, device=q.device, dtype=torch.float32)
+    off = torch.arange(block__64, device=q.device, dtype=torch.float32)
     index = off[:, None] - off[None, :]
 
     if s.ndim not in (1, 2):
         raise ValueError(f"Expected s to have shape [H] or [B, H], got {tuple(s.shape)}")
 
-    for bi in range(b):
-        for hi in range(h):
+    for bi in range(b__1):
+        for hi in range(h__1):
             s_val = s[hi] if s.ndim == 1 else s[bi, hi]
             s_val = s_val.to(torch.float32)
             q_decay_full = torch.exp(-s_val * off)
-            k_trans_decay_full = torch.exp(-s_val * (block - off))
-            block_decay = torch.exp(-s_val * block)
+            k_trans_decay_full = torch.exp(-s_val * (block__64 - off))
+            block_decay = torch.exp(-s_val * block__64)
             diag_decay_full = torch.where(
                 index >= 0,
                 torch.exp(-s_val * index),
                 torch.zeros_like(index),
             )
 
-            for e_start in range(0, e, block_model):
-                e_end = min(e_start + block_model, e)
-                kv = torch.full((d, e_end - e_start), 1.0, dtype=torch.float32, device=q.device)
+            for e_start in range(0, e__128, block_model__32):
+                e_end = min(e_start + block_model__32, e__128)
+                kv = torch.full((d__128, e_end - e_start), 1.0, dtype=torch.float32, device=q.device)
 
-                for blk in range(num_blocks):
-                    start = blk * block
-                    end = min(start + block, n)
+                for blk in range(num_blocks__1):
+                    start = blk * block__64
+                    end = min(start + block__64, n__64)
                     if start >= end:
                         break
                     length = end - start
