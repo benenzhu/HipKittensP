@@ -36,11 +36,12 @@ CHUNK_SIZE = 64
 
 
 def generate_inputs(B, H, N):
-    q = torch.arange(B * H * N * D_QK, dtype=torch.bfloat16, device='cuda').reshape(B, H, N, D_QK) * 0.001 + 1
-    k = torch.arange(B * H * N * D_QK, dtype=torch.bfloat16, device='cuda').reshape(B, H, N, D_QK) * 0.001
-    # q = torch.randn((B, H, N, D_QK), dtype=torch.bfloat16, device='cuda') / (D_QK ** 0.5)
-    # k = torch.randn((B, H, N, D_QK), dtype=torch.bfloat16, device='cuda') / (D_QK ** 0.5)
+    # q = torch.arange(B * H * N * D_QK, dtype=torch.bfloat16, device='cuda').reshape(B, H, N, D_QK) * 0.00005 + 0.5
+    # k = torch.arange(B * H * N * D_QK, dtype=torch.bfloat16, device='cuda').reshape(B, H, N, D_QK) * 0.00005
+    q = torch.randn((B, H, N, D_QK), dtype=torch.bfloat16, device='cuda') / (D_QK ** 0.5)
+    k = torch.randn((B, H, N, D_QK), dtype=torch.bfloat16, device='cuda') / (D_QK ** 0.5)
     v = torch.randn((B, H, N, D_VO), dtype=torch.bfloat16, device='cuda')
+    # v = torch.arange(B * H * N * D_VO, dtype=torch.bfloat16, device='cuda').reshape(B, H, N, D_VO) * 0.00005
 
     # q = torch.ones((B, H, N, D_QK), dtype=torch.bfloat16, device='cuda')
     # k = torch.ones((B, H, N, D_QK), dtype=torch.bfloat16, device='cuda')
@@ -118,10 +119,10 @@ def linear_attn_ref_online(q___1_1_64_128, k__1_1_64_128, v__1_1_64_128, s, bloc
     print(block_model__32)
     print(block__64)
 
-    out = torch.empty((b__1, h__1, n__64, e__128), dtype=q___1_1_64_128.dtype, device=q___1_1_64_128.device)
-    out_debug = torch.empty_like(out) if return_debug else None
-    kv0_debug = torch.empty((b__1, h__1, d__128, e__128), dtype=torch.float32, device=q___1_1_64_128.device) if return_debug else None
-    kv1_debug = torch.empty((b__1, h__1, d__128, e__128), dtype=torch.float32, device=q___1_1_64_128.device) if return_debug else None
+    out = torch.zeros((b__1, h__1, n__64, e__128), dtype=q___1_1_64_128.dtype, device=q___1_1_64_128.device)
+    out_debug = torch.zeros_like(out) if return_debug else None
+    kv0_debug = torch.zeros((b__1, h__1, d__128, e__128), dtype=torch.float32, device=q___1_1_64_128.device) if return_debug else None
+    kv1_debug = torch.zeros((b__1, h__1, d__128, e__128), dtype=torch.float32, device=q___1_1_64_128.device) if return_debug else None
 
     off = torch.arange(block__64, device=q___1_1_64_128.device, dtype=torch.float32)
     index = off[:, None] - off[None, :]
@@ -182,8 +183,13 @@ def linear_attn_ref_online(q___1_1_64_128, k__1_1_64_128, v__1_1_64_128, s, bloc
                     print("att_block.T\n", qk__64_64.T)
                     #  3. s @ v
                     o_intra__64_32 = torch.matmul(qk__64_64, v_blk__64_32)
+                    print("o_intra_64_32.T\n", o_intra__64_32.T)
+                    print("o_intra_64_32.T\n", (o_intra__64_32.T[:,32:]))
                     o_inter_raw__64_32 = torch.matmul(q_reg, kv__128_32)
-                    o_inter = o_inter_raw__64_32 * q_decay__64_1
+                    
+                    print("o_inter.T\n", o_inter_raw__64_32.T)
+                    print("o_inter[32:].T\n", (o_inter_raw__64_32.T[:,32:]))
+                    o_inter = o_inter_raw__64_32 # * q_decay__64_1
                     o_blk__64_32 = o_intra__64_32 + o_inter
                     # print(f"o_inter_raw.shape: {o_inter_rpaw__64_32.shape}", kv__128_32.shape)
                     # print(f"q_decay.shape: {q_decay__64_1.shape}")
@@ -315,9 +321,15 @@ for N in sequence_lengths:
     # save_test_case(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), s, triton_out.transpose(1, 2), N, triton_debug_out.transpose(1, 2)) # for amd layout
     print(f"Generated random test case for N={N}")
     print(q.shape, k.shape, v.shape, s.shape, triton_out.shape)
-    ret = run_kittens_mla(q, k, v, s, triton_out)
-    print(ret)
-
+    kittens_out = run_kittens_mla(q, k, v, s, triton_out)
+    # print(f"{kittens_out=}")
+    # print(f"{pytorch_out=}")
+    abs_diff = torch.abs(kittens_out - pytorch_out)
+    rel_diff = abs_diff / (torch.abs(pytorch_out) + 1e-12)
+    max_abs_diff = abs_diff.max().item()
+    max_rel_diff = rel_diff.max().item()
+    print(f"max_abs_diff: {max_abs_diff:.6g}, max_rel_diff: {max_rel_diff:.6g}")
+    assert torch.allclose(kittens_out, pytorch_out, atol=1e-3, rtol=1e-3)
 
 
 

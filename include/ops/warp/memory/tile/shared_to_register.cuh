@@ -707,12 +707,16 @@ __device__ inline static void load(RT &dst, const ST &src) {
                                 // Use one ds_read_b64_tr_b16 for stride == 4, dtype == bf16
                                 } else if constexpr (RT::base_tile_stride == 4) {
                                     asm volatile(
+                                        "s_waitcnt vmcnt(0)\n"
+                                        "s_waitcnt lgkmcnt(0)\n"
                                         "ds_read_b64_tr_b16 %0, %1 offset:%2\n"
                                         "s_waitcnt lgkmcnt(0)\n"
+                                        "s_waitcnt vmcnt(0)\n"
                                         : "=v"(*reinterpret_cast<float2*>(&dst.tiles[register_row][register_col].data[idx]))
                                         : "v"(addr), "i"(offset)
                                         : "memory"
                                     );
+                                    
                                 } else {
                                     static_assert(false, "Unsupported stride");
                                 }

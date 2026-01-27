@@ -121,7 +121,7 @@ __device__ bool thread0() {
 #define Dkw(xx, n) do { if(threadIdx.x == n)printf("%d, K:%d threadIdx.x: %d " #xx ": %lf\n",  __LINE__, k, threadIdx.x, static_cast<float>(xx)); } while (0)
  
  
-template <int row=16, int col=16, int stride=16>
+template <int row=16, int col=16, int stride=col>
 __device__ void print_mem(const __hip_bfloat16 *ptr){
     if(threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) { 
         for(int i = 0; i < row; i ++) {
@@ -697,12 +697,22 @@ void lightning_attn2_kernel(
         // v_reg * attn_block_bf16 -> o_intra, (64x32)^T * (64x64) = 32x64
         // 3.   s @ V
         mma_AtB(o_intra, v_reg, attn_block_bf16, o_intra);
+        // {
+        //     for(int j = 0; j < 2; j++){
+        //         for(int i = 0; i < 8; i++){
+
+        //             D(o_intra.tiles[0][j].data[i].x);
+        //             D(o_intra.tiles[0][j].data[i].y);
+        //         }
+                
+        //     }
+        // }
 
         __builtin_amdgcn_s_setprio(0);
         __builtin_amdgcn_sched_barrier(0);
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
-#ifdef DEBUG
+#ifdef DEBUG22
         __builtin_amdgcn_s_waitcnt(0);
         __builtin_amdgcn_sched_barrier(0);
         __builtin_amdgcn_s_barrier();
@@ -773,7 +783,7 @@ void lightning_attn2_kernel(
         // load(local_kv_reg, kv_state_smem);
         load(local_kv_reg, subtile_inplace<ATTN_F__128/4, V_CHUNK_SIZE__32>(kv_state_smem, {0, 0}));
         BARRIER;
-#ifdef DEBUG
+#ifdef DEBUG22
         if (blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0) {
             // tile[0][0]
             for (int i = 0; i < 4; i++) {
@@ -816,6 +826,16 @@ void lightning_attn2_kernel(
         BARRIER;
         mma_AtB(o_inter, local_kv_reg, subtile_inplace<ATTN_F__128/4>(q_reg_transposed, 3), o_inter);
         // mul_col(o_inter, o_inter, q_decay_rv); // currently commented out for o_inter debug dump
+        {
+            for(int j = 0; j < 2; j++){
+                for(int i = 0; i < 8; i++){
+
+                    D(o_inter.tiles[0][j].data[i].x);
+                    D(o_inter.tiles[0][j].data[i].y);
+                }
+                
+            }
+        }
 
 
         // update KV state
@@ -834,12 +854,40 @@ void lightning_attn2_kernel(
         rt_fl<CHUNK_SIZE__64, ATTN_F__128, col_l, rt_32x32_s> local_k;           // 64x128
         rt_bf<CHUNK_SIZE__64, ATTN_F__128, col_l, rt_32x32_s> local_k_bf16;      // 64x128
         
+        BARRIER
         load(local_k, k_smem[0]);
+        BARRIER
         col_vec<rt_fl<CHUNK_SIZE__64, ATTN_D__128, col_l, rt_32x32_s>> k_decay_rv;
+        BARRIER
         load(k_decay_rv, k_decay);
+        BARRIER
         mul_row(local_k, local_k, k_decay_rv);
         // mul_row(k_reg, k_reg, k_decay_rv);
+        BARRIER
+        {
+            for(int j = 0; j < 2; j++){
+                for(int i = 0; i < 8; i++){
+
+                    D(local_k.tiles[j][0].data[i].x);
+                    D(local_k.tiles[j][0].data[i].y);
+                }
+                
+            }
+        }
+        BARRIER
         copy(local_k_bf16, local_k);
+        BARRIER
+        {
+            for(int j = 0; j < 2; j++){
+                for(int i = 0; i < 8; i++){
+
+                    D(local_k_bf16.tiles[j][0].data[i].x);
+                    D(local_k_bf16.tiles[j][0].data[i].y);
+                }
+                
+            }
+        }
+        BARRIER
         __builtin_amdgcn_sched_barrier(0);
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
@@ -865,12 +913,26 @@ void lightning_attn2_kernel(
         }
 #endif
         mul(local_kv, local_kv, block_decay);
+
         // D: 128x128 float
         // A: k_reg_transposed [ATTN_F, CHUNK_SIZE], 128x64, bf16
         // A: k_reg [CHUNK_SIZE, ATTN_F], 64x128, bf16
         // A: local_k_bf16, [CHUNK_SIZE, ATTN_F], 64x128, bf16
         // B: [CHUNK_SIZE, ATTN_D], 64x128
         mma_AtB(local_kv, local_k_bf16, v_reg, local_kv);
+
+        // BARRIER
+        // {
+        //     for(int j = 0; j < 2; j++){
+        //         for(int i = 0; i < 8; i++){
+
+        //             D(local_kv.tiles[j][0].data[i].x);
+        //             D(local_kv.tiles[j][0].data[i].y);
+        //         }
+                
+        //     }
+        // }
+        // BARRIER
         __builtin_amdgcn_s_setprio(0);
         __builtin_amdgcn_sched_barrier(0);
         __builtin_amdgcn_s_barrier();
@@ -879,7 +941,9 @@ void lightning_attn2_kernel(
         
         // store updated kv state
         // TODO
+        BARRIER
         store(kv_state_smem, local_kv);
+        BARRIER
         asm volatile("s_waitcnt lgkmcnt(0)");
         asm volatile("s_waitcnt vmcnt(0)");
         __builtin_amdgcn_sched_barrier(0);
@@ -894,6 +958,10 @@ void lightning_attn2_kernel(
             printf("after store updated local_kv to kv_state_smem, kv_state_sum %f\n", kv_state_sum);
         }
 #endif
+        
+
+        // print_mem<128, 32, 32>(kv_state_smem.data);
+        BARRIER
 
        // o_intra + o_inter
        // o_intra [V_CHUNK_SIZE, CHUNK_SIZE] 32x64, o_inter [V_CHUNK_SIZE, CHUNK_SIZE]
@@ -903,9 +971,9 @@ void lightning_attn2_kernel(
        o_tile<ATTN_D__128, float, row_l, rt_32x32_s> o_reg_transposed; // [CHUNK_SIZE, V_CHUNK_SIZE]
        transpose(o_reg_transposed, o_intra);
 
-#ifdef zztodocompile
+// #ifdef zztodocompile
        store<1>(Og, o_reg_transposed, {batch_idx, block, head_idx, 0});
-#endif
+// #endif
 
         // debug dump o_inter
         o_tile<ATTN_D__128, float, row_l, rt_32x32_s> o_inter_transposed; // [CHUNK_SIZE, V_CHUNK_SIZE]
