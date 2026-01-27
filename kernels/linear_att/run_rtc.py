@@ -86,6 +86,84 @@ def linear_attn_naive_qkv_lightning_version(q, k, v):
         o[:, :, start:end, :] = o_chunk
     return o
 
+def linear_attn_ref_online(q, k, v, s, block=CHUNK_SIZE, block_model=None, return_debug=False):
+    """
+    Torch reference for lightning_attn2 forward.
+    Mirrors the Triton _fwd_kernel in baselines/lightning_attn2_dump.py.
+    The e dimension is processed in block_model tiles to match kernel grid.
+    """
+    b, h, n, d = q.shape
+    e = v.shape[-1]
+    if block_model is None:
+        block_model = min(1 << (e - 1).bit_length(), 32)
+    num_blocks = (n + block - 1) // block
+
+    out = torch.empty((b, h, n, e), dtype=q.dtype, device=q.device)
+    out_debug = torch.empty_like(out) if return_debug else None
+    kv0_debug = torch.empty((b, h, d, e), dtype=torch.float32, device=q.device) if return_debug else None
+    kv1_debug = torch.empty((b, h, d, e), dtype=torch.float32, device=q.device) if return_debug else None
+
+    off = torch.arange(block, device=q.device, dtype=torch.float32)
+    index = off[:, None] - off[None, :]
+
+    if s.ndim not in (1, 2):
+        raise ValueError(f"Expected s to have shape [H] or [B, H], got {tuple(s.shape)}")
+
+    for bi in range(b):
+        for hi in range(h):
+            s_val = s[hi] if s.ndim == 1 else s[bi, hi]
+            s_val = s_val.to(torch.float32)
+            q_decay_full = torch.exp(-s_val * off)
+            k_trans_decay_full = torch.exp(-s_val * (block - off))
+            block_decay = torch.exp(-s_val * block)
+            diag_decay_full = torch.where(
+                index >= 0,
+                torch.exp(-s_val * index),
+                torch.zeros_like(index),
+            )
+
+            for e_start in range(0, e, block_model):
+                e_end = min(e_start + block_model, e)
+                kv = torch.full((d, e_end - e_start), 1.0, dtype=torch.float32, device=q.device)
+
+                for blk in range(num_blocks):
+                    start = blk * block
+                    end = min(start + block, n)
+                    if start >= end:
+                        break
+                    length = end - start
+
+                    q_blk = q[bi, hi, start:end, :].to(torch.float32)
+                    k_blk = k[bi, hi, start:end, :].to(torch.float32)
+                    v_blk = v[bi, hi, start:end, e_start:e_end].to(torch.float32)
+
+                    diag_decay = diag_decay_full[:length, :length]
+                    q_decay = q_decay_full[:length].unsqueeze(-1)
+                    k_trans_decay = k_trans_decay_full[:length]
+
+                    qk = torch.matmul(q_blk, k_blk.transpose(0, 1)) * diag_decay
+                    o_intra = torch.matmul(qk, v_blk)
+                    o_inter_raw = torch.matmul(q_blk, kv)
+                    o_inter = o_inter_raw * q_decay
+                    o_blk = o_intra + o_inter
+
+                    out[bi, hi, start:end, e_start:e_end] = o_blk.to(out.dtype)
+                    if return_debug:
+                        out_debug[bi, hi, start:end, e_start:e_end] = o_inter_raw.to(out.dtype)
+
+                    kv = block_decay * kv + torch.matmul(
+                        k_blk.transpose(0, 1) * k_trans_decay, v_blk
+                    )
+                    if return_debug:
+                        if blk == 0:
+                            kv0_debug[bi, hi, :, e_start:e_end] = kv
+                        elif blk == 1:
+                            kv1_debug[bi, hi, :, e_start:e_end] = kv
+
+    if return_debug:
+        return out, out_debug, kv0_debug, kv1_debug
+    return out
+
 def save_test_case(q, k, v, s, o, n, o_debug=None):
     filename = f'naive_qkv_randn_{n}.txt'
     print(f"slopes: {s}")
@@ -142,7 +220,10 @@ for N in sequence_lengths:
 
     # pytorch_out = linear_attn(q, k, v, s)
     # pytorch_out = linear_attn_naive_qkv(q, k, v)
-    pytorch_out = linear_attn_naive_qkv_lightning_version(q, k, v)
+    # pytorch_out = linear_attn_naive_qkv_lightning_version(q, k, v)
+    pytorch_out, pytorch_debug_out, kv0_ref, kv1_ref = linear_attn_ref_online(
+        q, k, v, s, return_debug=True
+    )
     import pdb
     # pdb.set_trace()
     triton_out, triton_debug_out, kv0_debug, kv1_debug = lightning_attn2(q, k, v, s)
@@ -158,6 +239,7 @@ for N in sequence_lengths:
     assert torch.allclose(triton_out, triton_out_naive, atol=1e-3, rtol=1e-3)
     assert torch.allclose(triton_debug_out, triton_debug_out_naive, atol=1e-3, rtol=1e-3)
     assert torch.allclose(kv0_debug, kv0_naive, atol=1e-5, rtol=1e-5)
+    assert torch.allclose(pytorch_out, triton_out, atol=1e-5, rtol=1e-5)
     # assert torch.allclose(kv1_debug, kv1_naive, atol=1e-5, rtol=1e-5)
     
     avg_mag_pytorch = torch.mean(torch.abs(pytorch_out)).item()

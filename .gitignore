@@ -39,3 +39,4 @@ read*.cpp
 *.s
 *.bc
 *.hipi
+*.npy
