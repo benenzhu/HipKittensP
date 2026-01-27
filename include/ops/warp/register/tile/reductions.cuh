@@ -312,7 +312,7 @@ __device__ static inline void col_reduce(V &col_accum, const T &src, const V &sr
 }
 
 namespace zz2 {
-#ifndef hip_rtc
+#ifdef hip_rtczz
     // template<typename op, ducks::rv::all V, ducks::rt::row_layout T, bool reset>
     using op =  base_ops::max;
     using T = rt_fl<16, 32, col_l>;

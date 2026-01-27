@@ -352,10 +352,10 @@ namespace zz2 {
         if constexpr (ST::underlying_subtile_rows >= RT::base_tile_rows && ST::underlying_subtile_cols >= RT::base_tile_cols) {
             constexpr int register_subtiles_per_shared_subtile_row = ST::underlying_subtile_cols / RT::base_tile_cols;
             constexpr int register_subtiles_per_shared_subtile_col = ST::underlying_subtile_rows / RT::base_tile_rows;
-            if(threadIdx.x == 0){
-                printf("zty:: %d %d %d %d\n", RT::base_tile_num_strides, register_subtiles_per_shared_subtile_col, register_subtiles_per_shared_subtile_row, ST::subtiles_per_col, 
-                    ST::rows,  ST::underlying_subtile_rows);
-            }
+            // if(threadIdx.x == 0){
+            //     printf("zty:: %d %d %d %d\n", RT::base_tile_num_strides, register_subtiles_per_shared_subtile_col, register_subtiles_per_shared_subtile_row, ST::subtiles_per_col, 
+            //         ST::rows,  ST::underlying_subtile_rows);
+            // }
             
             #pragma unroll
             for (int k = 0; k < RT::base_tile_num_strides; k++) {

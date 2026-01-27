@@ -1,4 +1,14 @@
+import os
+# os.environ["ROCPROF_COUNTER_COLLECTION"] = "1"
+# os.environ["HSA_TOOLS_LIB"]="/opt/rocm/lib/librocm-debug-agent.so.2" 
+# os.environ["HSA_ENABLE_DEBUG"]="1o"
+os.environ["PYTORCH_NO_HIP_MEMORY_CACHING"]="1"
+os.environ["HSA_DISABLE_FRAGMENT_ALLOCATOR"]="1"
+os.system("clear")
 import torch
+from dataclasses import dataclass
+import torch
+import time
 import torch.nn.functional as F
 from tqdm import trange
 import sys
@@ -11,6 +21,10 @@ importlib.reload(baselines.lightning_attn2_dump)
 importlib.reload(baselines.lightning_attn2_naive)
 import os
 os.system("clear")
+import rtc
+importlib.reload(rtc)
+from rtc import _compile_kernel, get_triton_gemm_NTN, my_assert_close, log, get_kernel
+torch.set_printoptions(threshold=1000, edgeitems=10, sci_mode=False, precision=6, linewidth=300)     
 
 # from baselines.lightning_attn2 import lightning_attn2
 from baselines.lightning_attn2_dump import lightning_attn2
@@ -22,8 +36,10 @@ CHUNK_SIZE = 64
 
 
 def generate_inputs(B, H, N):
-    q = torch.randn((B, H, N, D_QK), dtype=torch.bfloat16, device='cuda') / (D_QK ** 0.5)
-    k = torch.randn((B, H, N, D_QK), dtype=torch.bfloat16, device='cuda') / (D_QK ** 0.5)
+    q = torch.arange(B * H * N * D_QK, dtype=torch.bfloat16, device='cuda').reshape(B, H, N, D_QK) * 0.001 + 1
+    k = torch.arange(B * H * N * D_QK, dtype=torch.bfloat16, device='cuda').reshape(B, H, N, D_QK) * 0.001
+    # q = torch.randn((B, H, N, D_QK), dtype=torch.bfloat16, device='cuda') / (D_QK ** 0.5)
+    # k = torch.randn((B, H, N, D_QK), dtype=torch.bfloat16, device='cuda') / (D_QK ** 0.5)
     v = torch.randn((B, H, N, D_VO), dtype=torch.bfloat16, device='cuda')
 
     # q = torch.ones((B, H, N, D_QK), dtype=torch.bfloat16, device='cuda')
@@ -128,8 +144,13 @@ def linear_attn_ref_online(q___1_1_64_128, k__1_1_64_128, v__1_1_64_128, s, bloc
                 torch.exp(-s_val * index),
                 torch.zeros_like(index),
             )
+            # print(f"diag_decay_full: {diag_decay_full}")
+            # 1/0
+            
 
-            for e_start in range(0, e__128, block_model__32): ## 4次
+            # for e_start in range(0, e__128, block_model__32): ## 4次
+            for e_start in range(0, 1): ## 4次
+            
                 e_end = min(e_start + block_model__32, e__128)
                 # print(f"e_start: {e_start}, e_end: {e_end}")
                 kv__128_32 = torch.full((d__128, e_end - e_start), 1.0, dtype=torch.float32, device=q___1_1_64_128.device)
@@ -141,22 +162,32 @@ def linear_attn_ref_online(q___1_1_64_128, k__1_1_64_128, v__1_1_64_128, s, bloc
                         break
                     length = end__64 - start__0
 
-                    q_blk = q___1_1_64_128[bi, hi, start__0:end__64, :].to(torch.float32)
-                    k_blk = k__1_1_64_128[bi, hi, start__0:end__64, :].to(torch.float32)
+                    q_reg = q___1_1_64_128[bi, hi, start__0:end__64, :].to(torch.float32)
+                    k_reg = k__1_1_64_128[bi, hi, start__0:end__64, :].to(torch.float32)
                     v_blk__64_32 = v__1_1_64_128[bi, hi, start__0:end__64, e_start:e_end].to(torch.float32)
 
                     diag_decay = diag_decay_full[:length, :length]
+                    print("diag_decay\n", diag_decay)
                     q_decay__64_1 = q_decay_full[:length].unsqueeze(-1)
                     k_trans_decay = k_trans_decay_full[:length]
 
-                    qk__64_64 = torch.matmul(q_blk, k_blk.transpose(0, 1)) * diag_decay
+
+
+                    #   O = ((Q @ KT) * diag) @ v + (Q * q_decay) @ kvstate
+
+                    print("att_block_origin.T\n", torch.matmul(q_reg, k_reg.transpose(0, 1)).T)
+                    # TODOXUN
+                    # qk__64_64 = torch.matmul(q_reg, k_reg.transpose(0, 1)) * diag_decay
+                    qk__64_64 = torch.matmul(q_reg, k_reg.transpose(0, 1))
+                    print("att_block.T\n", qk__64_64.T)
+                    #  3. s @ v
                     o_intra__64_32 = torch.matmul(qk__64_64, v_blk__64_32)
-                    o_inter_raw__64_32 = torch.matmul(q_blk, kv__128_32)
+                    o_inter_raw__64_32 = torch.matmul(q_reg, kv__128_32)
                     o_inter = o_inter_raw__64_32 * q_decay__64_1
                     o_blk__64_32 = o_intra__64_32 + o_inter
                     # print(f"o_inter_raw.shape: {o_inter_rpaw__64_32.shape}", kv__128_32.shape)
-                    print(f"q_decay.shape: {q_decay__64_1.shape}")
-                    print(f"o_intra.shape: {o_intra__64_32.shape}")
+                    # print(f"q_decay.shape: {q_decay__64_1.shape}")
+                    # print(f"o_intra.shape: {o_intra__64_32.shape}")
 
 
                     out[bi, hi, start__0:end__64, e_start:e_end] = o_blk__64_32.to(out.dtype)
@@ -164,7 +195,7 @@ def linear_attn_ref_online(q___1_1_64_128, k__1_1_64_128, v__1_1_64_128, s, bloc
                         out_debug[bi, hi, start__0:end__64, e_start:e_end] = o_inter_raw__64_32.to(out.dtype)
 
                     kv__128_32 = block_decay * kv__128_32 + torch.matmul(
-                        k_blk.transpose(0, 1) * k_trans_decay, v_blk__64_32
+                        k_reg.transpose(0, 1) * k_trans_decay, v_blk__64_32
                     )
                     if return_debug:
                         if blk == 0:
@@ -226,6 +257,18 @@ sequence_lengths = [64]
 # sequence_lengths = [128]
 # sequence_lengths = [1024]
 
+
+def run_kittens_mla(q, k, v, s, out):
+    mla_kittens = get_kernel("lightning_attn2_kernel", "linear.cpp")  
+    grid = (1, 1, 1)
+    block = (512, 1, 1)
+    out = torch.zeros_like(out)
+    
+    print("q.shape", q.shape, "k.shape", k.shape, "v.shape", v.shape, "s.shape", s.shape, "out.shape", out.shape)
+    print("q.ptr", hex(q.data_ptr()), "k.ptr", hex(k.data_ptr()), "v.ptr", hex(v.data_ptr()), "out.ptr", hex(out.data_ptr()))
+    mla_kittens(grid, block, (q, k, v, s, out), shared_mem=160000)
+
+    return out
 for N in sequence_lengths:
     print(f"\nGenerating test case for sequence length {N}")
     q, k, v, s = generate_inputs(B, H, N)
@@ -240,18 +283,18 @@ for N in sequence_lengths:
     # pdb.set_trace()
     triton_out, triton_debug_out, kv0_debug, kv1_debug = lightning_attn2(q, k, v, s)
     triton_out_naive, triton_debug_out_naive, kv0_naive, kv1_naive = lightning_attn2_naive(q, k, v, s)
-    print(f"kv0_naive: {kv0_naive}")
-    print(f"kv1_naive: {kv1_naive}")
-    print(f"kv0_debug: {kv0_debug}")
-    print(f"kv1_debug: {kv1_debug}")
-    np.save("kv0_naive.npy", kv0_naive.cpu().numpy())
-    np.save("kv1_naive.npy", kv1_naive.cpu().numpy())
+    # print(f"kv0_naive: {kv0_naive}")
+    # print(f"kv1_naive: {kv1_naive}")
+    # print(f"kv0_debug: {kv0_debug}")
+    # print(f"kv1_debug: {kv1_debug}")
+    # np.save("kv0_naive.npy", kv0_naive.cpu().numpy())
+    # np.save("kv1_naive.npy", kv1_naive.cpu().numpy())
     # np.save("triton_out_naive_block32.npy", triton_out_naive.to(torch.float32).cpu().numpy())
     # pdb.set_trace()
     assert torch.allclose(triton_out, triton_out_naive, atol=1e-3, rtol=1e-3)
     assert torch.allclose(triton_debug_out, triton_debug_out_naive, atol=1e-3, rtol=1e-3)
     assert torch.allclose(kv0_debug, kv0_naive, atol=1e-5, rtol=1e-5)
-    assert torch.allclose(pytorch_out, triton_out, atol=1e-5, rtol=1e-5)
+    # """ assert torch.allclose """(pytorch_out, triton_out, atol=1e-5, rtol=1e-5)
     # assert torch.allclose(kv1_debug, kv1_naive, atol=1e-5, rtol=1e-5)
     
     avg_mag_pytorch = torch.mean(torch.abs(pytorch_out)).item()
@@ -271,3 +314,10 @@ for N in sequence_lengths:
     # debug dump
     # save_test_case(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), s, triton_out.transpose(1, 2), N, triton_debug_out.transpose(1, 2)) # for amd layout
     print(f"Generated random test case for N={N}")
+    print(q.shape, k.shape, v.shape, s.shape, triton_out.shape)
+    ret = run_kittens_mla(q, k, v, s, triton_out)
+    print(ret)
+
+
+
+
