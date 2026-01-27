@@ -86,29 +86,32 @@ def linear_attn_naive_qkv_lightning_version(q, k, v):
         o[:, :, start:end, :] = o_chunk
     return o
 
-def linear_attn_ref_online(q, k, v, s, block__64=CHUNK_SIZE, block_model__32=None, return_debug=False):
+def linear_attn_ref_online(q___1_1_64_128, k__1_1_64_128, v__1_1_64_128, s, block__64=CHUNK_SIZE, block_model__32=None, return_debug=False):
     """
     Torch reference for lightning_attn2 forward.
     Mirrors the Triton _fwd_kernel in baselines/lightning_attn2_dump.py.
     The e dimension is processed in block_model tiles to match kernel grid.
     """
-    b__1, h__1, n__64, d__128 = q.shape
+    b__1, h__1, n__64, d__128 = q___1_1_64_128.shape
     print(n__64, d__128)
-    e__128 = v.shape[-1]
-    print(v.shape)
+    e__128 = v__1_1_64_128.shape[-1]
+    print(v__1_1_64_128.shape)
     if block_model__32 is None:
         block_model__32 = min(1 << (e__128 - 1).bit_length(), 32)
     num_blocks__1 = (n__64 + block__64 - 1) // block__64
     print(block_model__32)
     print(block__64)
 
-    out = torch.empty((b__1, h__1, n__64, e__128), dtype=q.dtype, device=q.device)
+    out = torch.empty((b__1, h__1, n__64, e__128), dtype=q___1_1_64_128.dtype, device=q___1_1_64_128.device)
     out_debug = torch.empty_like(out) if return_debug else None
-    kv0_debug = torch.empty((b__1, h__1, d__128, e__128), dtype=torch.float32, device=q.device) if return_debug else None
-    kv1_debug = torch.empty((b__1, h__1, d__128, e__128), dtype=torch.float32, device=q.device) if return_debug else None
+    kv0_debug = torch.empty((b__1, h__1, d__128, e__128), dtype=torch.float32, device=q___1_1_64_128.device) if return_debug else None
+    kv1_debug = torch.empty((b__1, h__1, d__128, e__128), dtype=torch.float32, device=q___1_1_64_128.device) if return_debug else None
 
-    off = torch.arange(block__64, device=q.device, dtype=torch.float32)
+    off = torch.arange(block__64, device=q___1_1_64_128.device, dtype=torch.float32)
     index = off[:, None] - off[None, :]
+    print(index)
+    # print(v__1_1_64_p128.shape)
+    # 1/0
 
     if s.ndim not in (1, 2):
         raise ValueError(f"Expected s to have shape [H] or [B, H], got {tuple(s.shape)}")
@@ -126,43 +129,48 @@ def linear_attn_ref_online(q, k, v, s, block__64=CHUNK_SIZE, block_model__32=Non
                 torch.zeros_like(index),
             )
 
-            for e_start in range(0, e__128, block_model__32):
+            for e_start in range(0, e__128, block_model__32): ## 4次
                 e_end = min(e_start + block_model__32, e__128)
-                kv = torch.full((d__128, e_end - e_start), 1.0, dtype=torch.float32, device=q.device)
+                # print(f"e_start: {e_start}, e_end: {e_end}")
+                kv__128_32 = torch.full((d__128, e_end - e_start), 1.0, dtype=torch.float32, device=q___1_1_64_128.device)
 
                 for blk in range(num_blocks__1):
-                    start = blk * block__64
-                    end = min(start + block__64, n__64)
-                    if start >= end:
+                    start__0 = blk * block__64
+                    end__64 = min(start__0 + block__64, n__64)
+                    if start__0 >= end__64:
                         break
-                    length = end - start
+                    length = end__64 - start__0
 
-                    q_blk = q[bi, hi, start:end, :].to(torch.float32)
-                    k_blk = k[bi, hi, start:end, :].to(torch.float32)
-                    v_blk = v[bi, hi, start:end, e_start:e_end].to(torch.float32)
+                    q_blk = q___1_1_64_128[bi, hi, start__0:end__64, :].to(torch.float32)
+                    k_blk = k__1_1_64_128[bi, hi, start__0:end__64, :].to(torch.float32)
+                    v_blk__64_32 = v__1_1_64_128[bi, hi, start__0:end__64, e_start:e_end].to(torch.float32)
 
                     diag_decay = diag_decay_full[:length, :length]
-                    q_decay = q_decay_full[:length].unsqueeze(-1)
+                    q_decay__64_1 = q_decay_full[:length].unsqueeze(-1)
                     k_trans_decay = k_trans_decay_full[:length]
 
-                    qk = torch.matmul(q_blk, k_blk.transpose(0, 1)) * diag_decay
-                    o_intra = torch.matmul(qk, v_blk)
-                    o_inter_raw = torch.matmul(q_blk, kv)
-                    o_inter = o_inter_raw * q_decay
-                    o_blk = o_intra + o_inter
+                    qk__64_64 = torch.matmul(q_blk, k_blk.transpose(0, 1)) * diag_decay
+                    o_intra__64_32 = torch.matmul(qk__64_64, v_blk__64_32)
+                    o_inter_raw__64_32 = torch.matmul(q_blk, kv__128_32)
+                    o_inter = o_inter_raw__64_32 * q_decay__64_1
+                    o_blk__64_32 = o_intra__64_32 + o_inter
+                    # print(f"o_inter_raw.shape: {o_inter_rpaw__64_32.shape}", kv__128_32.shape)
+                    print(f"q_decay.shape: {q_decay__64_1.shape}")
+                    print(f"o_intra.shape: {o_intra__64_32.shape}")
 
-                    out[bi, hi, start:end, e_start:e_end] = o_blk.to(out.dtype)
+
+                    out[bi, hi, start__0:end__64, e_start:e_end] = o_blk__64_32.to(out.dtype)
                     if return_debug:
-                        out_debug[bi, hi, start:end, e_start:e_end] = o_inter_raw.to(out.dtype)
+                        out_debug[bi, hi, start__0:end__64, e_start:e_end] = o_inter_raw__64_32.to(out.dtype)
 
-                    kv = block_decay * kv + torch.matmul(
-                        k_blk.transpose(0, 1) * k_trans_decay, v_blk
+                    kv__128_32 = block_decay * kv__128_32 + torch.matmul(
+                        k_blk.transpose(0, 1) * k_trans_decay, v_blk__64_32
                     )
                     if return_debug:
                         if blk == 0:
-                            kv0_debug[bi, hi, :, e_start:e_end] = kv
+                            kv0_debug[bi, hi, :, e_start:e_end] = kv__128_32
                         elif blk == 1:
-                            kv1_debug[bi, hi, :, e_start:e_end] = kv
+                            kv1_debug[bi, hi, :, e_start:e_end] = kv__128_32
 
     if return_debug:
         return out, out_debug, kv0_debug, kv1_debug
