@@ -29,7 +29,7 @@
 // #ifndef PYTHON_CALL
 // DeepSeek-V2/V3 MLA 参数
 constexpr int BATCH = 4;
-constexpr int H_Q = 128;          // query heads
+constexpr int H_Q__128 = 128;          // query heads
 constexpr int H_KV = 1;           // kv heads (MLA absorbed)
 constexpr int DV__512 = 512;           // value dim (kv_lora_rank)
 constexpr int DPE = 64;           // rope dim
@@ -98,12 +98,12 @@ __device__ bool thread0() {
 
 
 
- using GL_Q = gl<bf16, 1, BATCH, H_Q, DV__512>;
- using GL_QPE = gl<bf16, 1, BATCH, H_Q, DPE>;
+ using GL_Q = gl<bf16, 1, BATCH, H_Q__128, DV__512>;
+ using GL_QPE = gl<bf16, 1, BATCH, H_Q__128, DPE>;
  using GL_KV = gl<bf16, 1, BATCH, SEQ_LEN, DV__512>;
  using GL_KVPE = gl<bf16, 1, BATCH, SEQ_LEN, DPE>;
 //  using GL_TABLE = gl<int, 1, 1, BATCH, SEQ_LEN>;
- using GL_O = gl<bf16, 1, BATCH, H_Q, DV__512>;
+ using GL_O = gl<bf16, 1, BATCH, H_Q__128, DV__512>;
  using G = kittens::group<NUM_WARPS>;
  
 
@@ -237,7 +237,6 @@ void flashmla_paged_decoding(
     bf16* __restrict__ kv_ptr,
     bf16* __restrict__ kvpe_ptr,
     bf16* __restrict__ output_ptr
-    #ifdef ZZD
     ,         // [batch, h_q, dv]
     bf16* __restrict__ debug1_acc,         // [batch, h_q, dv]
     bf16* __restrict__ tile_debug2,         // [batch, h_q, dv]
@@ -245,6 +244,7 @@ void flashmla_paged_decoding(
     float* __restrict__ debug_4_out,         // [batch, h_q, dv]
     float* __restrict__ tile_debug5,         // [batch, h_q, dv]
     bf16* __restrict__ debug6_accpre         // [batch, h_q, dv]
+    #ifdef ZZD
     #endif
     // int* __restrict__ block_table,     // [batch, max_num_blocks]
     // bf16* __restrict__ blocked_kv,             // [total_tokens, h_kv, dv]
@@ -284,9 +284,13 @@ void flashmla_paged_decoding(
     
 
     {
-        G::load(shared_s, Q, {0, 0, 0, 0});
+        // G::load(shared_s, Q, {0, 0, int(blockIdx.y), 0});
+        BARRIER;
+        // if(blockIdx.x == 0 && blockIdx.y == 1){
+        //     print_mem<1, 64, 64>(shared_s.data);
+        // }
         using STT = st_bf<64, 64, st_16x16_s>;
-        kittens::load<2, false, STT, gl<__hip_bfloat16, 1, BATCH, H_Q, DV__512>, coord<STT>, 512>(shared_s, Q, {0,0,0,0});
+        // kittens::load<2, false, STT, gl<__hip_bfloat16, 1, BATCH, H_Q, DV__512>, coord<STT>, 512>(shared_s, Q, {0,0,1,0});
     }
     
 
@@ -351,6 +355,7 @@ void flashmla_paged_decoding(
     // for (int k = 0; k < num_kv_blocks; k++){
 
     const auto iter_num = num_kv_blocks;
+    // const auto iter_num = 1;
     for (int k = 0; k < iter_num; k++){
         //  KV_shared = T.copy(blocked_kv)::: [64, 576]
         // if(thread0())printf("batch_idx:%d, pos: %d, kv_ptr %p DV: %d\n", batch_idx, k * BLOCK_N, kv_ptr, DV);
@@ -721,16 +726,16 @@ void flashmla_paged_decoding(
     }
     // transpose(o_reg_transposed, acc_o);
     // D(sum_tile(o_reg_transposed));
-    print_mem<1, 64, 64>(shared_scale.data);
+    // print_mem<1, 64, 64>(shared_scale.data);
     // D(log_sum_row.data[0][0].x);
     // D(log_sum_row.data[0][0].y);
     auto print_tile4 = [&](rt_fl<64, 64, row_l, rt_16x16_s> A2_tile, bf16* out){
         if(threadIdx.x == 0){
-            printf("B2_tile\n");
+            // printf("B2_tile\n");
         }
         for(int row = 0; row < 64; row++){
             if(threadIdx.x == 0){
-                printf("         [ ");
+                // printf("         [ ");
             }
             for(int col = 0; col < 64; col++){
                 constexpr int Inner_row = 16;
@@ -752,11 +757,11 @@ void flashmla_paged_decoding(
                 __syncthreads();
             }
             if(threadIdx.x == 0){
-                printf("]\n");
+                // printf("]\n");
             }
         }
         if(threadIdx.x == 0){
-            printf("\n\n");
+            // printf("\n\n");
 
         }
         __syncthreads();

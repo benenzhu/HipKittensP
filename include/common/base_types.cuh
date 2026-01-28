@@ -280,6 +280,7 @@ template<> struct convertor<float, bf16> {
 // };
 template<> struct convertor<bf16, float> {
     static __host__ __device__ inline bf16 convert(const float &u) {
+        return __float2bfloat16(u);
         // Fast unsafe conversion (truncation only)
         return std::bit_cast<bf16>(
             static_cast<uint16_t>(

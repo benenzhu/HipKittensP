@@ -399,6 +399,7 @@ __device__ inline static void store(const GL &dst, const RT &src, const COORD &i
                 #pragma unroll
                 for(int l = 0; l < src.base_tile_stride / packing; l++) {
                     int idx = l + k * src.base_tile_stride / packing;
+                    // base_types::convertor<bf16, float>::convert(src.tiles[i][j].data[idx].x);
                     dst_ptr[(row+l*2)*row_stride + col] = base_types::convertor<U, T>::convert(src.tiles[i][j].data[idx].x);
                     dst_ptr[(row+l*2+1)*row_stride + col] = base_types::convertor<U, T>::convert(src.tiles[i][j].data[idx].y);
                 }

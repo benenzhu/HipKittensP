@@ -374,8 +374,8 @@ def flashmla_ref_online(
     debug: Optional[List[Dict[str, torch.Tensor]]] = [] if return_debug else None
 
     # for start in range(0, seq_len, block_n):
-    iter_num = 10
     iter_num = seq_len // block_n
+    # iter_num = 1
     for start in range(0, block_n * iter_num, block_n):
         end = min(start + block_n, seq_len)
         shared_KV = kvf[:, start:end]
@@ -465,12 +465,12 @@ if choose == 0:
     ret = test_kittens_gemm_kernel()
 elif choose == 1:
     mla_kittens = get_kernel("flashmla_paged_decoding", "flashmla_paged_decoding.cpp")  
-    grid = (b, 2, 1)
+    grid = (b, h_q__128 // 64, 1)
     block = (512, 1, 1)
     SEQ_LEN = 4096
     torch.random.manual_seed(0)
     q = torch.randn(b, s_q__1, h_q__128, dv__512).cuda().bfloat16().contiguous()
-    # q = torch.arange(b * s_q__1 * h_q__128___tmp64 * dv__512).cuda().bfloat16().contiguous().reshape(q.shape) * 0.0001 + 0.2
+    # q = torch.arange(b * s_q__1 * h_q__128 * dv__512).cuda().bfloat16().contiguous().reshape(q.shape) * 0.0001 + 0.2
     qpe = torch.randn(b, s_q__1, h_q__128, dpe__64).cuda().bfloat16().contiguous()
     kv = torch.randn(1, b, SEQ_LEN, dv__512).cuda().bfloat16().contiguous()  # * 0.0 + 0.1
     # kv = (torch.arange(b * 4096 * dv__512).cuda().bfloat16().contiguous() * 0.0001).reshape(kv.shape)
@@ -491,7 +491,7 @@ elif choose == 1:
     INCLUDE_PE_REF = False  # kernel currently does not use qpe/kvpe in scores
     USE_ONLINE_REF = True  # set True to use online reference
     HEAD_GROUP = 0
-    BLOCK_H = 128
+    BLOCK_H = h_q__128
     BLOCK_N = 64
 
     if DEBUG_REF:

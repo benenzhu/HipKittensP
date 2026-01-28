@@ -286,7 +286,7 @@ def _nvrtc_compile(
     
     # Print compilation log if not empty (e.g., -Rpass-analysis output)
     if compile_log.value and compile_log.value.strip():
-        log(f"Compilation log:\n{compile_log.value.decode()}")
+        print(f"Compilation log:\n{compile_log.value.decode()}")
 
     # Get PTX
     ptx_size = ctypes.c_size_t()
@@ -748,7 +748,7 @@ def get_kernel(kernel_name, file_name="00_add.hip", config=None):
         remaining_source = '\n'.join(source_lines[num_lines_to_replace:])
         source = "".join(defines) + remaining_source
     if len(defines) > 0:
-        log("".join(defines))   
+        print("".join(defines))   
 
     kernel = _compile_kernel(
         kernel_source=source,
@@ -769,5 +769,5 @@ def get_kernel(kernel_name, file_name="00_add.hip", config=None):
         save_ptx=True,
     )
     toc = time.time()
-    log(f"compile used {toc - tic}")
+    print(f"compile used {toc - tic}")
     return kernel
