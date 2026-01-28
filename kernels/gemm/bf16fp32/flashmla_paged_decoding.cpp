@@ -123,7 +123,7 @@ __device__ bool thread0() {
 #define Dkw(xx, n) do { if(threadIdx.x == n)printf("%d, K:%d threadIdx.x: %d " #xx ": %lf\n",  __LINE__, k, threadIdx.x, static_cast<float>(xx)); } while (0)
  
  
-template <int row=16, int col=16, int stride=16, typename T>
+template <int row=16, int col=16, int stride=col, typename T>
 __device__ void print_mem(const T *ptr){
     if(threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) { 
         for(int i = 0; i < row; i ++) {
@@ -237,11 +237,12 @@ void flashmla_paged_decoding(
     bf16* __restrict__ kv_ptr,
     bf16* __restrict__ kvpe_ptr,
     bf16* __restrict__ output_ptr,         // [batch, h_q, dv]
-    bf16* __restrict__ tile_debug,         // [batch, h_q, dv]
+    bf16* __restrict__ debug1_acc,         // [batch, h_q, dv]
     bf16* __restrict__ tile_debug2,         // [batch, h_q, dv]
     bf16* __restrict__ debug_acc_o,         // [batch, h_q, dv]
     float* __restrict__ debug_4_out,         // [batch, h_q, dv]
-    float* __restrict__ tile_debug5         // [batch, h_q, dv]
+    float* __restrict__ tile_debug5,         // [batch, h_q, dv]
+    bf16* __restrict__ debug6_accpre         // [batch, h_q, dv]
     // int* __restrict__ block_table,     // [batch, max_num_blocks]
     // bf16* __restrict__ blocked_kv,             // [total_tokens, h_kv, dv]
     // int* __restrict__ cache_seqlens,   // [batch]
@@ -322,6 +323,8 @@ void flashmla_paged_decoding(
     rt_bf<64, 64, col_l, rt_32x16_s> B2_tile;
     rt_fl<64, 64, col_l, rt_16x16_s> acc_o; // 2row, 4col.
     typename decltype(acc_s_trans)::col_vec max_vec, max_vec_prev, scores_sum, log_sum, scale_vec;
+    
+    // scale_vec.data;
     typename decltype(acc_o)::col_vec o_scale_vec;
     zero(acc_s);
     ones(scale_vec);
@@ -344,7 +347,8 @@ void flashmla_paged_decoding(
     // for (int k = 0; k < num_kv_blocks; k++){
     // for (int k = 0; k < num_kv_blocks; k++){
 
-    for (int k = 0; k < 2; k++){
+    const auto iter_num = num_kv_blocks;
+    for (int k = 0; k < iter_num; k++){
         //  KV_shared = T.copy(blocked_kv)::: [64, 576]
         // if(thread0())printf("batch_idx:%d, pos: %d, kv_ptr %p DV: %d\n", batch_idx, k * BLOCK_N, kv_ptr, DV);
         G::load(shared_KV, KV, {0, batch_idx, k, 0});
@@ -354,7 +358,7 @@ void flashmla_paged_decoding(
         BARRIER;
         
 
-        #ifdef hip_rtc
+        #ifdef hip_rtc222
         if(thread0()){
             float shared_Q_sum = 0;
             for(int i = 0; i < 32768; i++){
@@ -492,12 +496,17 @@ void flashmla_paged_decoding(
         }
         BARRIER;
         __syncthreads();
+        // for(int i = 0; i < 64; i++){
+        //     tile_debug5[i] = shared_scale.data[i];
+        // }
+        
+        BARRIER;
         // Dk2(sum_tile(acc_s_trans));
         for(int i = 0; i < 4; i++){
-            o_scale_vec.data[i][0].x = shared_scale.data[i * 16 + lane_id % 4 * 4];
-            o_scale_vec.data[i][0].y = shared_scale.data[i * 16 + lane_id % 4 * 4 + 1];
-            o_scale_vec.data[i][1].x = shared_scale.data[i * 16 + lane_id % 4 * 4 + 2];
-            o_scale_vec.data[i][1].y = shared_scale.data[i * 16 + lane_id % 4 * 4 + 3];
+            o_scale_vec.data[i][0].x = shared_scale.data[i * 16 + lane_id / 16 * 4];
+            o_scale_vec.data[i][0].y = shared_scale.data[i * 16 + lane_id / 16 * 4 + 1];
+            o_scale_vec.data[i][1].x = shared_scale.data[i * 16 + lane_id / 16 * 4 + 2];
+            o_scale_vec.data[i][1].y = shared_scale.data[i * 16 + lane_id / 16 * 4 + 3];
         }
         BARRIER;
 
@@ -528,6 +537,16 @@ void flashmla_paged_decoding(
         BARRIER;
         
 
+        // torch.allclose
+        print_tile3(acc_o, debug6_accpre);
+            
+        // print_mem<1, 64>(shared_scale.data);
+        for(int i = 0 ; i < 4; i++){
+            for(int j = 0 ; j < 2; j++){
+                D(o_scale_vec.data[i][j].x);
+                D(o_scale_vec.data[i][j].y);
+            }
+        }
         mul_row(acc_o, acc_o, o_scale_vec);
 
         // acc_o.tiles  // (64,64 | 16,16 | col)
@@ -648,8 +667,10 @@ void flashmla_paged_decoding(
             };
             
             BARRIER;
-            print_tile2(A2_tile, tile_debug);
+            print_tile2(A2_tile, debug1_acc);
             print_tile2(B2_tile, tile_debug2);
+            // print_tile3(acc_o, debug_acc_pre);
+            BARRIER;
             // PT(A2_tile);
             // PT(B2_tile);
 
