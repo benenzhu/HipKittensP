@@ -777,7 +777,9 @@ void flashmla_paged_decoding(
     // }
     
     // TODO(zty):::::: 
-    store(output, acc_o, {0, batch_idx, head_group, warp_id});
+    // if(batch_idx == 0){
+        store(output, acc_o, {0, batch_idx, head_group, warp_id});
+    // }
 }
 
 // Host-side launcher (for non-RTC usage)
