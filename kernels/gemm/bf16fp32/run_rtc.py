@@ -379,7 +379,7 @@ def flashmla_ref_online(
         end = min(start + block_n, seq_len)
         shared_KV = kvf[:, start:end]
         acc_s = torch.matmul(shared_Q, shared_KV.transpose(-1, -2)).float()
-        print(shared_Q.shape, shared_KV.shape)  
+        # print(shared_Q.shape, shared_KV.shape)  
 
         # (Q @ KT) @ KT
         # print("acc_s", acc_s)
@@ -408,12 +408,12 @@ def flashmla_ref_online(
         ## 8.1
         scores_sum = acc_s_trans.sum(dim=-1)
         # 8.2
-        print("scale_prev", scale_prev)
+        # print("scale_prev", scale_prev)
         l = l * scale_prev
         # 8.3
         l += scores_sum
         # print("l", l)
-        print(acc_s_trans.shape, shared_KV.shape, "KKKK")
+        # print(acc_s_trans.shape, shared_KV.shape, "KKKK")
         
         # [1, 64, 64]
         global aa, bb
@@ -426,9 +426,9 @@ def flashmla_ref_online(
         # print("bb", bb)
         # print("flatten", aa.flatten()@(bb.flatten()))
         # print("acc_o_pre", )
-        print("acc_s_trans_bf16", acc_s_trans.bfloat16())
+        # print("acc_s_trans_bf16", acc_s_trans.bfloat16())
         # print("shared_KV", shared_KV.bfloat16()[])
-        print("shared_KV\n", shared_KV[:,:,:64])
+        # print("shared_KV\n", shared_KV[:,:,:64])
         global KV_shared
         global acc_debug
         KV_shared = shared_KV[:, :, :64].clone()
@@ -440,7 +440,7 @@ def flashmla_ref_online(
 
         
         acc_o = acc_o_pre + torch.matmul(acc_s_trans.bfloat16(), shared_KV)
-        print("acc_o", acc_o)
+        # print("acc_o", acc_o)
 
         if return_debug and debug is not None:
             debug.append(
@@ -454,8 +454,8 @@ def flashmla_ref_online(
             )
 
         max_vec = max_vec_new
-        print("l_debug", l)
-    print("l", l)
+        # print("l_debug", l)
+    # print("l", l)
     out = acc_o.bfloat16() / l.clamp_min(1e-20).unsqueeze(-1).bfloat16()
     return out, debug
 # def run_kittens_mla(): 
@@ -530,6 +530,8 @@ elif choose == 1:
         # print(f"☘️{out_kernel[:,:,:,:64] - acc_o[:,:, :64]=}")
         real_diff = out_kernel[:,:,:,:] - ref_out[:,:, :]
         # with torch_printoptions(threshold=1000, edgeitems=36, sci_mode=False, precision=4, linewidth=900):     
+        my_assert_close(out_kernel, ref_out)
+        
         if True:
             print(f"{real_diff=}")
             print(f"real_diff.abs().max().item(): {real_diff.abs().max().item()}")

@@ -236,13 +236,16 @@ void flashmla_paged_decoding(
     bf16* __restrict__ qpe_ptr, 
     bf16* __restrict__ kv_ptr,
     bf16* __restrict__ kvpe_ptr,
-    bf16* __restrict__ output_ptr,         // [batch, h_q, dv]
+    bf16* __restrict__ output_ptr
+    #ifdef ZZD
+    ,         // [batch, h_q, dv]
     bf16* __restrict__ debug1_acc,         // [batch, h_q, dv]
     bf16* __restrict__ tile_debug2,         // [batch, h_q, dv]
     bf16* __restrict__ debug_acc_o,         // [batch, h_q, dv]
     float* __restrict__ debug_4_out,         // [batch, h_q, dv]
     float* __restrict__ tile_debug5,         // [batch, h_q, dv]
     bf16* __restrict__ debug6_accpre         // [batch, h_q, dv]
+    #endif
     // int* __restrict__ block_table,     // [batch, max_num_blocks]
     // bf16* __restrict__ blocked_kv,             // [total_tokens, h_kv, dv]
     // int* __restrict__ cache_seqlens,   // [batch]
@@ -538,13 +541,15 @@ void flashmla_paged_decoding(
         
 
         // torch.allclose
+        #ifdef ZZD
         print_tile3(acc_o, debug6_accpre);
+        #endif
             
         // print_mem<1, 64>(shared_scale.data);
         for(int i = 0 ; i < 4; i++){
             for(int j = 0 ; j < 2; j++){
-                D(o_scale_vec.data[i][j].x);
-                D(o_scale_vec.data[i][j].y);
+                // D(o_scale_vec.data[i][j].x);
+                // D(o_scale_vec.data[i][j].y);
             }
         }
         mul_row(acc_o, acc_o, o_scale_vec);
@@ -667,8 +672,10 @@ void flashmla_paged_decoding(
             };
             
             BARRIER;
+            #ifdef ZZD
             print_tile2(A2_tile, debug1_acc);
             print_tile2(B2_tile, tile_debug2);
+            #endif
             // print_tile3(acc_o, debug_acc_pre);
             BARRIER;
             // PT(A2_tile);
@@ -677,7 +684,9 @@ void flashmla_paged_decoding(
             mma_AtB(acc_o, A2_tile, B2_tile, acc_o);
             BARRIER;
 
+            #ifdef ZZD
             print_tile3(acc_o, debug_acc_o);
+            #endif
             // PT(acc_o)
         }
         // Dk(acc_o.tiles[0][0].data[0].x);
@@ -698,9 +707,11 @@ void flashmla_paged_decoding(
     // // D(sum_row(log_sum));
     // D(sum_tile(acc_o));
     // rt_fl<64, 64, row_l, rt_16x16_s> o_reg_transposed; // 2row, 4col. 
+    #ifdef ZZD
     for(int i = 0; i < 64; i++){
         tile_debug5[i] = shared_scale.data[i];
     }
+    #endif
     decltype(acc_o)::col_vec log_sum_row;
     for(int i = 0; i < 4; i++){
         for(int j = 0; j < 2; j++){
@@ -752,7 +763,9 @@ void flashmla_paged_decoding(
     }; 
     div_row(acc_o, acc_o, log_sum_row);
     BARRIER;
+    #ifdef ZZD
     print_tile3(acc_o, debug_4_out);
+    #endif
     // if(thread0()){
     //     printf("output1: %lf\n", o_reg_transposed.tiles[0][0].data[0].x);
     //     printf("output1: %lf\n", o_reg_transposed.tiles[0][0].data[0].y);
