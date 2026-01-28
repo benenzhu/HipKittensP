@@ -55,7 +55,7 @@ importlib.reload(flashmla_paged_decoding_ref)
 # importlib.reload(tritonblas.matmul)
 from rtc import _compile_kernel, get_triton_gemm_NTN, my_assert_close, log, get_kernel
 from flashmla_paged_decoding_ref import flashmla_ref_full
-torch.set_printoptions(threshold=1000, edgeitems=3, sci_mode=False, precision=4, linewidth=900)     
+torch.set_printoptions(threshold=4, edgeitems=3, sci_mode=False, precision=4, linewidth=900)     
 
 def _exp(x: torch.Tensor, use_exp2: bool) -> torch.Tensor:
     if use_exp2:
@@ -295,7 +295,7 @@ if True:
     # DeepSeek-V2/V3 MLA 参数
     b = 1           # batch size
     s_q__1 = 1         # decode 阶段 query 长度为 1
-    h_q__128___tmp64 = 64       # query heads
+    h_q__128 = 128       # query heads
     h_kv = 1        # kv heads (MLA absorb 后)
     d__576 = 576         # query/key dim = dv + dpe
     dv__512 = 512        # value dim (kv_lora_rank)
@@ -314,12 +314,12 @@ if True:
     max_seqlen_pad = math.ceil(max_seqlen / block_size) * block_size
     num_blocks_per_batch = max_seqlen_pad // block_size
     
-    q = torch.randn(b, s_q__1, h_q__128___tmp64, d__576, dtype=dtype, device=device)
+    q = torch.randn(b, s_q__1, h_q__128, d__576, dtype=dtype, device=device)
     block_table = torch.randperm(b * num_blocks_per_batch, dtype=torch.int32, device=device).view(b, num_blocks_per_batch)
     blocked_kv = torch.randn(block_table.numel(), block_size, h_kv, d__576, dtype=dtype, device=device)
     
     # 运行参考实现
-    out = ref_mla_decode(q, blocked_kv, block_table, cache_seqlens, h_q__128___tmp64, h_kv, d__576, dv__512, causal=True)
+    out = ref_mla_decode(q, blocked_kv, block_table, cache_seqlens, h_q__128, h_kv, d__576, dv__512, causal=True)
     
     print(f"Input Q shape: {q.shape}")
     print(f"Input blocked_kv shape: {blocked_kv.shape}")
@@ -369,6 +369,7 @@ def flashmla_ref_online(
     l = torch.zeros((bsz, h_q), device=shared_Q.device, dtype=torch.float32)
     global acc_o
     acc_o = torch.zeros((bsz, h_q, kvf.shape[2]), device=shared_Q.device, dtype=torch.float32)
+    print(acc_o.shape, "acc_o.shape")
 
     debug: Optional[List[Dict[str, torch.Tensor]]] = [] if return_debug else None
 
@@ -464,14 +465,14 @@ if choose == 0:
     ret = test_kittens_gemm_kernel()
 elif choose == 1:
     mla_kittens = get_kernel("flashmla_paged_decoding", "flashmla_paged_decoding.cpp")  
-    grid = (1, 1, 1)
+    grid = (b, 2, 1)
     block = (512, 1, 1)
     SEQ_LEN = 4096
     torch.random.manual_seed(0)
-    q = torch.randn(b, s_q__1, h_q__128___tmp64, dv__512).cuda().bfloat16().contiguous()
+    q = torch.randn(b, s_q__1, h_q__128, dv__512).cuda().bfloat16().contiguous()
     # q = torch.arange(b * s_q__1 * h_q__128___tmp64 * dv__512).cuda().bfloat16().contiguous().reshape(q.shape) * 0.0001 + 0.2
-    qpe = torch.randn(b, s_q__1, h_q__128___tmp64, dpe__64).cuda().bfloat16().contiguous()
-    kv = torch.randn(1, b, SEQ_LEN, dv__512).cuda().bfloat16().contiguous() * 0.1  # * 0.0 + 0.1
+    qpe = torch.randn(b, s_q__1, h_q__128, dpe__64).cuda().bfloat16().contiguous()
+    kv = torch.randn(1, b, SEQ_LEN, dv__512).cuda().bfloat16().contiguous()  # * 0.0 + 0.1
     # kv = (torch.arange(b * 4096 * dv__512).cuda().bfloat16().contiguous() * 0.0001).reshape(kv.shape)
     kvpe = torch.randn(1, b, SEQ_LEN, dpe__64).cuda().bfloat16().contiguous()
     debug1_acc = torch.zeros(64, 64).cuda().bfloat16().contiguous()
@@ -480,7 +481,7 @@ elif choose == 1:
     debug6_accpre = torch.zeros(64, 64).cuda().bfloat16().contiguous()
     debug_4_out = torch.zeros(64, 64).cuda().contiguous()
     debug_5_lsum = torch.zeros(64).cuda().contiguous()
-    out_kernel = torch.zeros((b, s_q__1, h_q__128___tmp64, dv__512), device="cuda", dtype=torch.bfloat16)
+    out_kernel = torch.zeros((b, s_q__1, h_q__128, dv__512), device="cuda", dtype=torch.bfloat16)
     mla_kittens(grid, block, (q, qpe, kv, kvpe, out_kernel, debug1_acc, tile_debug2, debug_acc_o, debug_4_out, debug_5_lsum, debug6_accpre), shared_mem=160000)
     torch.cuda.synchronize()
     print("hipkittens_flashmla_out", out_kernel)
@@ -490,10 +491,12 @@ elif choose == 1:
     INCLUDE_PE_REF = False  # kernel currently does not use qpe/kvpe in scores
     USE_ONLINE_REF = True  # set True to use online reference
     HEAD_GROUP = 0
-    BLOCK_H = 64
+    BLOCK_H = 128
     BLOCK_N = 64
 
     if DEBUG_REF:
+        print("q.shape", q.shape)
+        print("kv.shape", kv.shape)
         q_ref = q[:, 0] if q.dim() == 4 else q
         kv_ref = kv[0] if kv.dim() == 4 else kv
         qpe_ref = qpe[:, 0] if INCLUDE_PE_REF and qpe is not None and qpe.dim() == 4 else None
@@ -515,25 +518,25 @@ elif choose == 1:
             # print("ref_online_out", ref_out)
         out_view = out_kernel[:, 0] if out_kernel.dim() == 4 else out_kernel
         out_slice = out_view[:, HEAD_GROUP * BLOCK_H:(HEAD_GROUP + 1) * BLOCK_H, :].float()
-        
-        print(f"☘️{acc_debug - debug1_acc.T=}")
-        print(f"☘️{KV_shared - tile_debug2=}")
-        print(f"☘️{acc_o[:, :, :64] - debug_acc_o=}")
-        my_assert_close(acc_o[:, :, :64].float().squeeze(), debug_acc_o.float())
-        # print(f"{acc_o[:, :, :64] - debug_4_out=}")
-        print(f"☘️{debug_5_lsum - l=}")
-        my_assert_close(debug_5_lsum.float(), l.float())
-        print(f"☘️{ref_out[:,:,:64] - debug_4_out=}")
-        my_assert_close(ref_out[:,:,:64].float().squeeze(), debug_4_out.float())
-        print(f"{ref6_accpre[:,:,:64] - debug6_accpre=}")
-        print(f"{ref6_accpre[:,:,:64] - debug6_accpre=}")
+        if False:
+            print(f"☘️{acc_debug - debug1_acc.T=}")
+            print(f"☘️{KV_shared - tile_debug2=}")
+            print(f"☘️{acc_o[:, :, :64] - debug_acc_o=}")
+            my_assert_close(acc_o[:, :, :64].float().squeeze(), debug_acc_o.float())
+            # print(f"{acc_o[:, :, :64] - debug_4_out=}")
+            print(f"☘️{debug_5_lsum - l=}")
+            my_assert_close(debug_5_lsum.float(), l.float())
+            print(f"☘️{ref_out[:,:,:64] - debug_4_out=}")
+            my_assert_close(ref_out[:,:,:64].float().squeeze(), debug_4_out.float())
+            print(f"{ref6_accpre[:,:,:64] - debug6_accpre=}")
+            print(f"{ref6_accpre[:,:,:64] - debug6_accpre=}")
         # print(f"☘️{out_kernel[:,:,:,:64] - acc_o[:,:, :64]=}")
         real_diff = out_kernel[:,:,:,:] - ref_out[:,:, :]
         # with torch_printoptions(threshold=1000, edgeitems=36, sci_mode=False, precision=4, linewidth=900):     
         my_assert_close(out_kernel, ref_out)
         
         if True:
-            print(f"{real_diff=}")
+            # print(f"{real_diff=}")
             print(f"real_diff.abs().max().item(): {real_diff.abs().max().item()}")
         if True:
             diff = (out_slice - ref_out).abs()
