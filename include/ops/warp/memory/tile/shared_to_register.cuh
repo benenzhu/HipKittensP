@@ -969,7 +969,7 @@ __device__ inline static void load(RT &dst, const ST &src) {
                                 //     : "memory"
                                 // );
                                 if(threadIdx.x == 0){
-                                    printf("addr: %d, next_addr: %d, offset: %d\n", addr - src_ptr, next_addr, offset);
+                                    // printf("addr: %d, next_addr: %d, offset: %d\n", addr - src_ptr, next_addr, offset);
                                 }
                             // Use one ds_read_b64_tr_b16 for stride == 4, dtype == bf16
                             } 

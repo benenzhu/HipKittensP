@@ -24,7 +24,7 @@ os.system("clear")
 import rtc
 importlib.reload(rtc)
 from rtc import _compile_kernel, get_triton_gemm_NTN, my_assert_close, log, get_kernel
-torch.set_printoptions(threshold=1000, edgeitems=10, sci_mode=False, precision=6, linewidth=300)     
+torch.set_printoptions(threshold=1000, edgeitems=5, sci_mode=False, precision=6, linewidth=200)     
 
 # from baselines.lightning_attn2 import lightning_attn2
 from baselines.lightning_attn2_dump import lightning_attn2

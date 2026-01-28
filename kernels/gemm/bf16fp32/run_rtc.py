@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Tuple
 import torch
 from dataclasses import dataclass
 import torch
+from torch._tensor_str import printoptions as torch_printoptions
 import time
 import importlib
 import rtc
@@ -24,7 +25,7 @@ importlib.reload(flashmla_paged_decoding_ref)
 # importlib.reload(tritonblas.matmul)
 from rtc import _compile_kernel, get_triton_gemm_NTN, my_assert_close, log, get_kernel
 from flashmla_paged_decoding_ref import flashmla_ref_full, flashmla_ref_online
-torch.set_printoptions(threshold=1000, edgeitems=32, sci_mode=False, precision=6, linewidth=900)     
+torch.set_printoptions(threshold=1000, edgeitems=3, sci_mode=False, precision=4, linewidth=900)     
 
 def _exp(x: torch.Tensor, use_exp2: bool) -> torch.Tensor:
     if use_exp2:
@@ -334,6 +335,7 @@ def flashmla_ref_online(
     bsz, h_q, _ = shared_Q.shape
     seq_len = kvf.shape[1]
     max_vec = torch.full((bsz, h_q), -float("inf"), device=shared_Q.device, dtype=torch.float32)
+    global l
     l = torch.zeros((bsz, h_q), device=shared_Q.device, dtype=torch.float32)
     global acc_o
     acc_o = torch.zeros((bsz, h_q, kvf.shape[2]), device=shared_Q.device, dtype=torch.float32)
@@ -341,7 +343,7 @@ def flashmla_ref_online(
     debug: Optional[List[Dict[str, torch.Tensor]]] = [] if return_debug else None
 
     # for start in range(0, seq_len, block_n):
-    for start in range(0, block_n, block_n):
+    for start in range(0, block_n, block_n * 2):
         end = min(start + block_n, seq_len)
         shared_KV = kvf[:, start:end]
         acc_s = torch.matmul(shared_Q, shared_KV.transpose(-1, -2)).float()
@@ -406,7 +408,7 @@ def flashmla_ref_online(
 
         max_vec = max_vec_new
     print("l", l)
-    out = acc_o / l.clamp_min(1e-20).unsqueeze(-1)
+    out = acc_o.bfloat16() / l.clamp_min(1e-20).unsqueeze(-1).bfloat16()
     return out, debug
 # def run_kittens_mla(): 
 choose = 1
@@ -418,17 +420,19 @@ elif choose == 1:
     block = (512, 1, 1)
     SEQ_LEN = 4096
     torch.random.manual_seed(0)
-    q = torch.randn(b, s_q__1, h_q__128___tmp64, dv__512).cuda().bfloat16().contiguous() * 0.0 + 0.1
+    q = torch.randn(b, s_q__1, h_q__128___tmp64, dv__512).cuda().bfloat16().contiguous()
     # q = torch.arange(b * s_q__1 * h_q__128___tmp64 * dv__512).cuda().bfloat16().contiguous().reshape(q.shape) * 0.0001 + 0.2
     qpe = torch.randn(b, s_q__1, h_q__128___tmp64, dpe__64).cuda().bfloat16().contiguous()
-    kv = torch.randn(1, b, SEQ_LEN, dv__512).cuda().bfloat16().contiguous()  # * 0.0 + 0.1
+    kv = torch.randn(1, b, SEQ_LEN, dv__512).cuda().bfloat16().contiguous() * 0.1  # * 0.0 + 0.1
     # kv = (torch.arange(b * 4096 * dv__512).cuda().bfloat16().contiguous() * 0.0001).reshape(kv.shape)
     kvpe = torch.randn(1, b, SEQ_LEN, dpe__64).cuda().bfloat16().contiguous()
     tile_debug = torch.zeros(64, 64).cuda().bfloat16().contiguous()
     tile_debug2 = torch.zeros(64, 64).cuda().bfloat16().contiguous()
-    tile_debug3 = torch.zeros(64, 64).cuda().bfloat16().contiguous()
+    debug_acc_o = torch.zeros(64, 64).cuda().bfloat16().contiguous()
+    debug_4_out = torch.zeros(64, 64).cuda().contiguous()
+    debug_5_lsum = torch.zeros(64).cuda().contiguous()
     out_kernel = torch.zeros((b, s_q__1, h_q__128___tmp64, dv__512), device="cuda", dtype=torch.bfloat16)
-    mla_kittens(grid, block, (q, qpe, kv, kvpe, out_kernel, tile_debug, tile_debug2, tile_debug3), shared_mem=160000)
+    mla_kittens(grid, block, (q, qpe, kv, kvpe, out_kernel, tile_debug, tile_debug2, debug_acc_o, debug_4_out, debug_5_lsum), shared_mem=160000)
     torch.cuda.synchronize()
     print("hipkittens_flashmla_out", out_kernel)
 
@@ -462,6 +466,22 @@ elif choose == 1:
             # print("ref_online_out", ref_out)
         out_view = out_kernel[:, 0] if out_kernel.dim() == 4 else out_kernel
         out_slice = out_view[:, HEAD_GROUP * BLOCK_H:(HEAD_GROUP + 1) * BLOCK_H, :].float()
+        
+        print(f"{acc_debug - tile_debug=}")
+        print(f"{KV_shared - tile_debug2=}")
+        print(f"{acc_o[:, :, :64] - debug_acc_o=}")
+        assert torch.allclose(acc_o[:, :, :64].float().squeeze(), debug_acc_o.float())
+        # print(f"{acc_o[:, :, :64] - debug_4_out=}")
+        print(f"{debug_5_lsum - l=}")
+        assert torch.allclose(debug_5_lsum.float(), l.float())
+        print(f"{ref_out[:,:,:64] - debug_4_out=}")
+        torch.testing.assert_close(ref_out[:,:,:64].float().squeeze(), debug_4_out.float(), rtol=1e-3, atol=1e-3)
+        print(f"{out_kernel[:,:,:,:64] - acc_o[:,:, :64]=}")
+        real_diff = out_kernel[:,:,:,:64] - ref_out[:,:, :64]
+        # with torch_printoptions(threshold=1000, edgeitems=36, sci_mode=False, precision=4, linewidth=900):     
+        if True:
+            print(f"{real_diff=}")
+            print(f"real_diff.abs().max().item(): {real_diff.abs().max().item()}")
         if True:
             diff = (out_slice - ref_out).abs()
             print(f"[ref] out_slice shape: {tuple(out_slice.shape)}")

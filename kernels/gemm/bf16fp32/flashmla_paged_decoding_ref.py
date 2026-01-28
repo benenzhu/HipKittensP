@@ -86,112 +86,113 @@ def flashmla_ref_full(
     probs = probs / probs.sum(dim=-1, keepdim=True)
     out = torch.matmul(probs.bfloat16(), kvf).float()
     return out
+l = None
 
+# def flashmla_ref_online(
+#     q: torch.Tensor,
+#     kv: torch.Tensor,
+#     qpe: Optional[torch.Tensor] = None,
+#     kvpe: Optional[torch.Tensor] = None,
+#     block_n: int = 64,
+#     block_h: int = 64,
+#     head_group: Optional[int] = None,
+#     scale: Optional[float] = None,
+#     use_exp2: bool = True,
+#     return_debug: bool = False,
+#     include_pe: bool = True,
+# ) -> Tuple[torch.Tensor, Optional[List[Dict[str, torch.Tensor]]]]:
+#     """
+#     Blocked online softmax reference. Mirrors the kernel's structure:
+#     - maintains max (m) and sum (l) per row
+#     - accumulates unnormalized output and divides by l at the end
+#     """
+#     _validate_shapes(q, kv, qpe, kvpe, include_pe)
+#     q_sel = _slice_q_heads(q, block_h, head_group)
+#     shared_Q = q_sel
+#     kvf = kv
 
-def flashmla_ref_online(
-    q: torch.Tensor,
-    kv: torch.Tensor,
-    qpe: Optional[torch.Tensor] = None,
-    kvpe: Optional[torch.Tensor] = None,
-    block_n: int = 64,
-    block_h: int = 64,
-    head_group: Optional[int] = None,
-    scale: Optional[float] = None,
-    use_exp2: bool = True,
-    return_debug: bool = False,
-    include_pe: bool = True,
-) -> Tuple[torch.Tensor, Optional[List[Dict[str, torch.Tensor]]]]:
-    """
-    Blocked online softmax reference. Mirrors the kernel's structure:
-    - maintains max (m) and sum (l) per row
-    - accumulates unnormalized output and divides by l at the end
-    """
-    _validate_shapes(q, kv, qpe, kvpe, include_pe)
-    q_sel = _slice_q_heads(q, block_h, head_group)
-    shared_Q = q_sel
-    kvf = kv
+#     if include_pe and qpe is not None and kvpe is not None:
+#         qpe_sel = _slice_q_heads(qpe, block_h, head_group)
+#         qpe_f = qpe_sel
+#         kvpe_f = kvpe
+#     else:
+#         qpe_f = None
+#         kvpe_f = None
 
-    if include_pe and qpe is not None and kvpe is not None:
-        qpe_sel = _slice_q_heads(qpe, block_h, head_group)
-        qpe_f = qpe_sel
-        kvpe_f = kvpe
-    else:
-        qpe_f = None
-        kvpe_f = None
+#     bsz, h_q, _ = shared_Q.shape
+#     seq_len = kvf.shape[1]
+#     max_vec = torch.full((bsz, h_q), -float("inf"), device=shared_Q.device, dtype=torch.float32)
+#     global l
+#     l = torch.zeros((bsz, h_q), device=shared_Q.device, dtype=torch.float32)
+#     acc_o = torch.zeros((bsz, h_q, kvf.shape[2]), device=shared_Q.device, dtype=torch.float32)
 
-    bsz, h_q, _ = shared_Q.shape
-    seq_len = kvf.shape[1]
-    max_vec = torch.full((bsz, h_q), -float("inf"), device=shared_Q.device, dtype=torch.float32)
-    l = torch.zeros((bsz, h_q), device=shared_Q.device, dtype=torch.float32)
-    acc_o = torch.zeros((bsz, h_q, kvf.shape[2]), device=shared_Q.device, dtype=torch.float32)
+#     debug: Optional[List[Dict[str, torch.Tensor]]] = [] if return_debug else None
 
-    debug: Optional[List[Dict[str, torch.Tensor]]] = [] if return_debug else None
+#     # for start in range(0, seq_len, block_n):
+#     for start in range(0, block_n, 2*block_n):
+#         end = min(start + block_n, seq_len)
+#         shared_KV = kvf[:, start:end]
+#         acc_s = torch.matmul(shared_Q, shared_KV.transpose(-1, -2)).float()
+#         print(shared_Q.shape, shared_KV.shape)  
 
-    # for start in range(0, seq_len, block_n):
-    for start in range(0, block_n, block_n):
-        end = min(start + block_n, seq_len)
-        shared_KV = kvf[:, start:end]
-        acc_s = torch.matmul(shared_Q, shared_KV.transpose(-1, -2)).float()
-        print(shared_Q.shape, shared_KV.shape)  
-
-        # (Q @ KT) @ KT
-        # print("acc_s", acc_s)
-        if qpe_f is not None and kvpe_f is not None:
-            acc_s = acc_s + torch.matmul(qpe_f, kvpe_f[:, start:end].transpose(-1, -2))
-        if scale is not None:
-            acc_s = acc_s * scale
+#         # (Q @ KT) @ KT
+#         # print("acc_s", acc_s)
+#         if qpe_f is not None and kvpe_f is not None:
+#             acc_s = acc_s + torch.matmul(qpe_f, kvpe_f[:, start:end].transpose(-1, -2))
+#         if scale is not None:
+#             acc_s = acc_s * scale
         
-        # print("shared_Q", shared_Q.shape)
-        # print("shared_KV", shared_KV.shape)
-        # print("acc_s", acc_s) # 对的...
+#         # print("shared_Q", shared_Q.shape)
+#         # print("shared_KV", shared_KV.shape)
+#         # print("acc_s", acc_s) # 对的...
 
-        block_max = acc_s.max(dim=-1).values
-        max_vec_new = torch.maximum(max_vec, block_max)
+#         block_max = acc_s.max(dim=-1).values
+#         max_vec_new = torch.maximum(max_vec, block_max)
 
-        scale_prev = _exp(max_vec - max_vec_new, use_exp2)
+#         scale_prev = _exp(max_vec - max_vec_new, use_exp2)
 
-        acc_s_trans = acc_s - max_vec_new.unsqueeze(-1)
-        acc_s_trans = _exp(acc_s_trans, use_exp2)
+#         acc_s_trans = acc_s - max_vec_new.unsqueeze(-1)
+#         acc_s_trans = _exp(acc_s_trans, use_exp2)
 
 
-        # print("acc_s_trans\n", acc_s_trans)
-        l = l * scale_prev + acc_s_trans.sum(dim=-1)
-        # print("l", l)
-        print(acc_s_trans.shape, shared_KV.shape, "KKKK")
+#         # print("acc_s_trans\n", acc_s_trans)
+#         l = l * scale_prev + acc_s_trans.sum(dim=-1)
+#         # print("l", l)
+#         print(acc_s_trans.shape, shared_KV.shape, "KKKK")
         
-        # [1, 64, 64]
-        global aa, bb
-        aa = acc_s_trans.bfloat16()[:, 0, :]
-        # print("shared_KV.shape", shared_KV.shape)
-        bb = shared_KV.bfloat16()[:, :, 0]
-        # for i in bb.flatten().tolist():
-        #     print("now", i)
-        # print("aa", aa)
-        # print("bb", bb)
-        # print("flatten", aa.flatten()@(bb.flatten()))
-        # print("acc_o_pre", )
-        print("acc_s_trans_bf16", acc_s_trans.bfloat16())
-        # print("shared_KV", shared_KV.bfloat16()[])
-        print("shared_KV\n", shared_KV[:,:,:64])
-        acc_o = acc_o * scale_prev.unsqueeze(-1) + torch.matmul(acc_s_trans.bfloat16(), shared_KV)
-        print("acc_o", acc_o)
+#         # [1, 64, 64]
+#         global aa, bb
+#         aa = acc_s_trans.bfloat16()[:, 0, :]
+#         # print("shared_KV.shape", shared_KV.shape)
+#         bb = shared_KV.bfloat16()[:, :, 0]
+#         # for i in bb.flatten().tolist():
+#         #     print("now", i)
+#         # print("aa", aa)
+#         # print("bb", bb)
+#         # print("flatten", aa.flatten()@(bb.flatten()))
+#         # print("acc_o_pre", )
+#         print("acc_s_trans_bf16", acc_s_trans.bfloat16())
+#         # print("shared_KV", shared_KV.bfloat16()[])
+#         print("shared_KV\n", shared_KV[:,:,:64])
+#         acc_o = acc_o * scale_prev.unsqueeze(-1) + torch.matmul(acc_s_trans.bfloat16(), shared_KV)
+#         print("acc_o", acc_o)
 
-        if return_debug and debug is not None:
-            debug.append(
-                {
-                    "start": torch.tensor(start, device=shared_Q.device),
-                    "block_max": block_max,
-                    "m_new": max_vec_new,
-                    "scale_prev": scale_prev,
-                    "block_sum": acc_s_trans.sum(dim=-1),
-                }
-            )
+#         if return_debug and debug is not None:
+#             debug.append(
+#                 {
+#                     "start": torch.tensor(start, device=shared_Q.device),
+#                     "block_max": block_max,
+#                     "m_new": max_vec_new,
+#                     "scale_prev": scale_prev,
+#                     "block_sum": acc_s_trans.sum(dim=-1),
+#                 }
+#             )
 
-        max_vec = max_vec_new
+#         max_vec = max_vec_new
 
-    print("l", l)
-    out = acc_o / l.clamp_min(1e-20).unsqueeze(-1)
-    return out, debug
+#     print("l", l)
+#     out = acc_o / l.clamp_min(1e-20).unsqueeze(-1)
+#     return out, debug
 
 
 def compare_refs(

@@ -123,8 +123,8 @@ __device__ bool thread0() {
 #define Dkw(xx, n) do { if(threadIdx.x == n)printf("%d, K:%d threadIdx.x: %d " #xx ": %lf\n",  __LINE__, k, threadIdx.x, static_cast<float>(xx)); } while (0)
  
  
-template <int row=16, int col=16, int stride=16>
-__device__ void print_mem(const __hip_bfloat16 *ptr){
+template <int row=16, int col=16, int stride=16, typename T>
+__device__ void print_mem(const T *ptr){
     if(threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) { 
         for(int i = 0; i < row; i ++) {
             if(i % 8 == 0 && i != 0) {
@@ -135,7 +135,7 @@ __device__ void print_mem(const __hip_bfloat16 *ptr){
                     printf("  ");
                 }
                 
-                float now = ptr[i*stride+j];
+                float now = float(ptr[i*stride+j]);
                 printf("%7.4lf ",  now);
             }
             printf("\n");
@@ -189,6 +189,45 @@ __device__ bf16 sum_row(D o_scores_sum){
 }
 
 
+template<typename T>
+__device__ void print_tile3(rt_fl<64, 64, col_l, rt_16x16_s> A2_tile, T* out){
+    if(threadIdx.x == 0){
+        // printf("B2_tile\n");
+    }
+    for(int row = 0; row < 64; row++){
+        if(threadIdx.x == 0){
+            // printf("         [ ");
+        }
+        for(int col = 0; col < 64; col++){
+            constexpr int Inner_row = 16;
+            constexpr int Inner_col = 16;
+            constexpr int stride = Inner_col * Inner_row / 64;
+            auto tile_row = row / Inner_row;
+            auto tile_col = col / Inner_col;
+            auto row_in = row % Inner_row;
+            auto col_in = col % Inner_col;
+            auto which_t = row_in / stride * Inner_col + col_in;
+            auto which_d = row_in % stride;
+            if(which_t == threadIdx.x){
+                auto &d = A2_tile.tiles[tile_row][tile_col].data[which_d / 2];
+                auto val = which_d % 2 == 0? d.x: d.y;
+                // printf("%d %d %d %d:", tile_row, tile_col, which_t, which_d);
+                // printf("%7.6lf, ", float(val));
+                out[row * 64 + col] = val;
+            }
+            __syncthreads();
+        }
+        if(threadIdx.x == 0){
+            // printf("]\n");
+        }
+    }
+    if(threadIdx.x == 0){
+        // printf("\n\n");
+
+    }
+    __syncthreads();
+};
+
 
 __global__ 
 __launch_bounds__(NUM_THREADS, 2)
@@ -200,7 +239,9 @@ void flashmla_paged_decoding(
     bf16* __restrict__ output_ptr,         // [batch, h_q, dv]
     bf16* __restrict__ tile_debug,         // [batch, h_q, dv]
     bf16* __restrict__ tile_debug2,         // [batch, h_q, dv]
-    bf16* __restrict__ tile_debug3         // [batch, h_q, dv]
+    bf16* __restrict__ debug_acc_o,         // [batch, h_q, dv]
+    float* __restrict__ debug_4_out,         // [batch, h_q, dv]
+    float* __restrict__ tile_debug5         // [batch, h_q, dv]
     // int* __restrict__ block_table,     // [batch, max_num_blocks]
     // bf16* __restrict__ blocked_kv,             // [total_tokens, h_kv, dv]
     // int* __restrict__ cache_seqlens,   // [batch]
@@ -301,7 +342,9 @@ void flashmla_paged_decoding(
     // for (int k = 0; k < num_kv_blocks - 2; k++){
     // for (int k = 0; k < num_kv_blocks; k++){
     // for (int k = 0; k < num_kv_blocks; k++){
-    for (int k = 0; k < 1; k++){
+    // for (int k = 0; k < num_kv_blocks; k++){
+
+    for (int k = 0; k < 2; k++){
         //  KV_shared = T.copy(blocked_kv)::: [64, 576]
         // if(thread0())printf("batch_idx:%d, pos: %d, kv_ptr %p DV: %d\n", batch_idx, k * BLOCK_N, kv_ptr, DV);
         G::load(shared_KV, KV, {0, batch_idx, k, 0});
@@ -317,17 +360,17 @@ void flashmla_paged_decoding(
             for(int i = 0; i < 32768; i++){
                 shared_Q_sum += float(shared_Q.data[i]);
             }
-            Dk(shared_Q_sum);
+            // Dk(shared_Q_sum);
             
 
             float shared_Q_repeat = 0;
 
-            Dk(shared_Q.data[0]);
+            // Dk(shared_Q.data[0]);
             float shared_K_sum = 0;
             for(int i = 0; i < 32768; i++){
                 shared_K_sum += float(shared_KV.data[i]);
             }
-            Dk(shared_K_sum);
+            // Dk(shared_K_sum);
         }
         __syncthreads();
         #endif
@@ -345,11 +388,11 @@ void flashmla_paged_decoding(
             BARRIER;
         }
         BARRIER;
+        #ifdef hip_rtc222
+        // if(k == 2){
         Dk(sum_tile(A_tile));
         Dk(sum_tile(B_tile));
         Dk(sum_tile(acc_s));
-        #ifdef hip_rtc
-        // if(k == 2){
             Dkn(acc_s.tiles[0][0].data[0].x, 5);
             Dk(acc_s.tiles[0][0].data[0].y);
             Dk(acc_s.tiles[0][0].data[1].x);
@@ -386,16 +429,16 @@ void flashmla_paged_decoding(
                     // Dk(acc_s_trans.tiles[0][0].data[0].y);
                 // }
             }
-            Dk(sum_tile(acc_s_trans));
+            // Dk(sum_tile(acc_s_trans));
             BARRIER;
         };
         s2r();
         
 
-        Dk(acc_s_trans.tiles[0][0].data[0].x);
-        Dk(acc_s_trans.tiles[0][0].data[0].y);
-        Dk(acc_s_trans.tiles[0][0].data[1].x);
-        Dk(acc_s_trans.tiles[0][0].data[1].y);
+        // Dk(acc_s_trans.tiles[0][0].data[0].x);
+        // Dk(acc_s_trans.tiles[0][0].data[0].y);
+        // Dk(acc_s_trans.tiles[0][0].data[1].x);
+        // Dk(acc_s_trans.tiles[0][0].data[1].y);
         
 
 
@@ -433,23 +476,23 @@ void flashmla_paged_decoding(
         
         // 8.1 scores_sum = T.row_sum(acc_s)
         // TODO:
-        D(acc_s_trans.tiles[0][0].data[0].x); // 8 * 64;
+        // D(acc_s_trans.tiles[0][0].data[0].x); // 8 * 64;
         zz3::row_reduce_sum(scores_sum, acc_s_trans, scores_sum);
-        D(scores_sum.data[0][0]);
+        // D(scores_sum.data[0][0]);
 
         // 8.2 logsum *=scale_vec 
         mul(log_sum, log_sum, scale_vec);
-        Dk(log_sum.data[0][0]);
+        // Dk(log_sum.data[0][0]);
         // 8.3 logsum += scores_sum
         add(log_sum, log_sum, scores_sum);
-        Dk(log_sum.data[0][0]);
+        // Dk(log_sum.data[0][0]);
         // 9 acc_o *= scores_vec
         if(lane_id / 8 == 0) {
             shared_scale.data[warp_id * 8 + lane_id % 8] = scale_vec.data[0][0];
         }
         BARRIER;
         __syncthreads();
-        Dk2(sum_tile(acc_s_trans));
+        // Dk2(sum_tile(acc_s_trans));
         for(int i = 0; i < 4; i++){
             o_scale_vec.data[i][0].x = shared_scale.data[i * 16 + lane_id % 4 * 4];
             o_scale_vec.data[i][0].y = shared_scale.data[i * 16 + lane_id % 4 * 4 + 1];
@@ -458,7 +501,7 @@ void flashmla_paged_decoding(
         }
         BARRIER;
 
-        auto translate_addr =[](int row, int col){
+        auto translate_addr =[](int col, int row){
             return 16 * (row % 16) + col % 16
                     + (row / 16) * 64 * 16
                     + (col / 16) * 16 * 16;
@@ -519,9 +562,9 @@ void flashmla_paged_decoding(
             // load(B2_tile, shared_KV);
             // Dk(A2_tile.tiles[0][0].data[0].y);
             // Dkn(A2_tile.tiles[0][0].data[0].x, 64);
-            Dk(A2_tile.tiles[0][0].data[0].y);
-            Dk(A2_tile.tiles[0][0].data[1].x);
-            Dk(A2_tile.tiles[0][0].data[1].y);
+            // Dk(A2_tile.tiles[0][0].data[0].y);
+            // Dk(A2_tile.tiles[0][0].data[1].x);
+            // Dk(A2_tile.tiles[0][0].data[1].y);
             
             BARRIER;
             bf16 sum_val_A = sum_tile(A2_tile);
@@ -536,8 +579,8 @@ void flashmla_paged_decoding(
             //         }
             //     }
             // }
-            Dk2(sum_val_A);
-            Dk2(sum_val_B);
+            // Dk2(sum_val_A);
+            // Dk2(sum_val_B);
             // print_mem<16, 16, 16>(shared_s.data);
             // print_mem<16, 16, 512>(shared_KV.data);
             auto print_tile = [](rt_bf<64, 64, row_l, rt_16x32_s> A2_tile){
@@ -569,11 +612,11 @@ void flashmla_paged_decoding(
             };
             auto print_tile2 = [&](rt_bf<64, 64, col_l, rt_32x16_s> A2_tile, bf16* out){
                 if(threadIdx.x == 0){
-                    printf("B2_tile\n");
+                    // printf("B2_tile\n");
                 }
                 for(int row = 0; row < 64; row++){
                     if(threadIdx.x == 0){
-                        printf("         [ ");
+                        // printf("         [ ");
                     }
                     for(int col = 0; col < 64; col++){
                         constexpr int Inner_row = 32;
@@ -594,11 +637,11 @@ void flashmla_paged_decoding(
                         __syncthreads();
                     }
                     if(threadIdx.x == 0){
-                        printf("]\n");
+                        // printf("]\n");
                     }
                 }
                 if(threadIdx.x == 0){
-                    printf("\n\n");
+                    // printf("\n\n");
 
                 }
                 __syncthreads();
@@ -612,50 +655,14 @@ void flashmla_paged_decoding(
 
             mma_AtB(acc_o, A2_tile, B2_tile, acc_o);
             BARRIER;
-            auto print_tile3 = [&](rt_fl<64, 64, col_l, rt_16x16_s> A2_tile, bf16* out){
-                if(threadIdx.x == 0){
-                    printf("B2_tile\n");
-                }
-                for(int row = 0; row < 64; row++){
-                    if(threadIdx.x == 0){
-                        printf("         [ ");
-                    }
-                    for(int col = 0; col < 64; col++){
-                        constexpr int Inner_row = 16;
-                        constexpr int Inner_col = 16;
-                        constexpr int stride = Inner_col * Inner_row / 64;
-                        auto tile_row = row / Inner_row;
-                        auto tile_col = col / Inner_col;
-                        auto row_in = row % Inner_row;
-                        auto col_in = col % Inner_col;
-                        auto which_t = row_in / stride * Inner_col + col_in;
-                        auto which_d = row_in % stride;
-                        if(which_t == threadIdx.x){
-                            auto &d = A2_tile.tiles[tile_row][tile_col].data[which_d / 2];
-                            auto val = which_d % 2 == 0? d.x: d.y;
-                            // printf("%d %d %d %d:", tile_row, tile_col, which_t, which_d);
-                            // printf("%7.6lf, ", float(val));
-                            out[row * 64 + col] = val;
-                        }
-                        __syncthreads();
-                    }
-                    if(threadIdx.x == 0){
-                        printf("]\n");
-                    }
-                }
-                if(threadIdx.x == 0){
-                    printf("\n\n");
 
-                }
-                __syncthreads();
-            };
-            print_tile3(acc_o, tile_debug3);
+            print_tile3(acc_o, debug_acc_o);
             // PT(acc_o)
         }
-        Dk(acc_o.tiles[0][0].data[0].x);
-        Dk(acc_o.tiles[0][0].data[0].y);
-        Dk(acc_o.tiles[0][0].data[1].x);
-        Dk(acc_o.tiles[0][0].data[1].y);
+        // Dk(acc_o.tiles[0][0].data[0].x);
+        // Dk(acc_o.tiles[0][0].data[0].y);
+        // Dk(acc_o.tiles[0][0].data[1].x);
+        // Dk(acc_o.tiles[0][0].data[1].y);
 
     }
     BARRIER;
@@ -666,26 +673,72 @@ void flashmla_paged_decoding(
     BARRIER;
     
 
-    D(sum_tile(acc_o));
-    // D(sum_row(log_sum));
-    D(sum_tile(acc_o));
-    rt_fl<64, 64, row_l, rt_16x16_s> o_reg_transposed; // 2row, 4col. 
-    decltype(o_reg_transposed)::col_vec log_sum_row;
+    // D(sum_tile(acc_o));
+    // // D(sum_row(log_sum));
+    // D(sum_tile(acc_o));
+    // rt_fl<64, 64, row_l, rt_16x16_s> o_reg_transposed; // 2row, 4col. 
+    for(int i = 0; i < 64; i++){
+        tile_debug5[i] = shared_scale.data[i];
+    }
+    decltype(acc_o)::col_vec log_sum_row;
     for(int i = 0; i < 4; i++){
-        log_sum_row.data[i][0] = shared_scale.data[lane_id / 4 + i * 16];
+        for(int j = 0; j < 2; j++){
+            log_sum_row.data[i][j].x = shared_scale.data[lane_id / 16 * 4 + i * 16 + j * 2];
+            log_sum_row.data[i][j].y = shared_scale.data[lane_id / 16 * 4 + i * 16 + j * 2 + 1];
+        }
     }
-    transpose(o_reg_transposed, acc_o);
-    D(sum_tile(o_reg_transposed));
-    D(log_sum_row.data[0][0]);
-    D(log_sum_row.data[1][0]);
-    div_row(o_reg_transposed, o_reg_transposed, log_sum_row);
-    if(thread0()){
-        printf("output1: %lf\n", o_reg_transposed.tiles[0][0].data[0].x);
-        printf("output1: %lf\n", o_reg_transposed.tiles[0][0].data[0].y);
-    }
+    // transpose(o_reg_transposed, acc_o);
+    // D(sum_tile(o_reg_transposed));
+    print_mem<1, 64, 64>(shared_scale.data);
+    // D(log_sum_row.data[0][0].x);
+    // D(log_sum_row.data[0][0].y);
+    auto print_tile4 = [&](rt_fl<64, 64, row_l, rt_16x16_s> A2_tile, bf16* out){
+        if(threadIdx.x == 0){
+            printf("B2_tile\n");
+        }
+        for(int row = 0; row < 64; row++){
+            if(threadIdx.x == 0){
+                printf("         [ ");
+            }
+            for(int col = 0; col < 64; col++){
+                constexpr int Inner_row = 16;
+                constexpr int Inner_col = 16;
+                constexpr int stride = Inner_col * Inner_row / 64;
+                auto tile_row = row / Inner_row;
+                auto tile_col = col / Inner_col;
+                auto row_in = row % Inner_row;
+                auto col_in = col % Inner_col;
+                auto which_t = col_in / stride * Inner_row + row_in;
+                auto which_d = col_in % stride;
+                if(which_t == threadIdx.x){
+                    auto &d = A2_tile.tiles[tile_row][tile_col].data[which_d / 2];
+                    auto val = which_d % 2 == 0? d.x: d.y;
+                    // printf("%d %d %d %d:", tile_row, tile_col, which_t, which_d);
+                    // printf("%7.6lf, ", float(val));
+                    out[row * 64 + col] = val;
+                }
+                __syncthreads();
+            }
+            if(threadIdx.x == 0){
+                printf("]\n");
+            }
+        }
+        if(threadIdx.x == 0){
+            printf("\n\n");
+
+        }
+        __syncthreads();
+    }; 
+    div_row(acc_o, acc_o, log_sum_row);
+    BARRIER;
+    print_tile3(acc_o, debug_4_out);
+    // if(thread0()){
+    //     printf("output1: %lf\n", o_reg_transposed.tiles[0][0].data[0].x);
+    //     printf("output1: %lf\n", o_reg_transposed.tiles[0][0].data[0].y);
+    // }
     
     // TODO(zty):::::: 
-    zhuzhustore::store(output, o_reg_transposed, {0, batch_idx, head_group, warp_id});
+    store(output, acc_o, {0, batch_idx, head_group, warp_id});
 }
 
 // Host-side launcher (for non-RTC usage)

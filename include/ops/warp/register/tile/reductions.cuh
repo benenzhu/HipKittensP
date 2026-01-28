@@ -108,8 +108,8 @@ __device__ static inline void row_reduce_sum(V &row_accum, const T &src, const V
     static_assert(!std::is_same_v<RT, fp8e4m3>, "Unsupported type for reduction");
 
     const int leader = laneid() % T::base_tile_rows;
-    D(rt_8x64_s::elements_per_thread);
-    D(src.base_tile_reductions);
+    // D(rt_8x64_s::elements_per_thread);
+    // D(src.base_tile_reductions);
     // D(row_accum.)
     const int max_shift__4 = T::base_tile_threads_per_reduction / 2;
     const int max_shift__3 = 3;
@@ -129,7 +129,7 @@ __device__ static inline void row_reduce_sum(V &row_accum, const T &src, const V
             }
         }
         RT accum_single = op::template op<RT>(accum_packed.x, accum_packed.y);
-        D(accum_single);
+        // D(accum_single);
 
         /* if constexpr (std::is_same_v<RT, bf16> && T::base_tile_rows == 32) {
             uint2_t res = __builtin_amdgcn_permlane32_swap(__bfloat16_as_ushort(accum_single), __bfloat16_as_ushort(accum_single), false, true);
@@ -145,11 +145,11 @@ __device__ static inline void row_reduce_sum(V &row_accum, const T &src, const V
         {
             for (int shift = max_shift__4; shift > 0; shift/=2) {
                 accum_single = op::template op<RT>(accum_single, __shfl_down(accum_single, shift * T::base_tile_rows));
-                D(accum_single);
+                // D(accum_single);
             }
 
             accum_single = __shfl(accum_single, leader);
-            D(accum_single);
+            // D(accum_single);
         }
 
         if(reset) {
